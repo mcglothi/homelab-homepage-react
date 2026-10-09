@@ -7,6 +7,17 @@ import { ServiceCard } from './components/Services/ServiceCard'
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { SERVICES } from './services'
 import { fetchAllData } from './api/index.js'
+import { useLocation } from './router'
+import { ThemeContext } from './ui/theme'
+import { Toaster } from './ui/primitives'
+import { Nav } from './components/TopBar/Nav'
+import AikbView from './views/Aikb/AikbView'
+import WatchView from './views/Watch/WatchView'
+import HaView from './views/HomeAssistant/HaView'
+import { ViewShell } from './views/bits'
+
+const VIEWS = { '/aikb': AikbView, '/watch': WatchView, '/ha': HaView }
+const TITLES = { '/': 'Docket', '/aikb': 'AIKB · Docket', '/watch': 'Watch · Docket', '/ha': 'HA · Docket' }
 
 const ACCENT_DEFAULT = '#ff2d6b'
 const BG_DEFAULT = '#080808'
@@ -49,6 +60,8 @@ function buildServiceData(apiData) {
 
 export default function App() {
   const { w } = useWindowSize()
+  const { path } = useLocation()
+  const View = path === '/' ? null : VIEWS[path]
   const isMobile = w < 640
   const isTablet = w >= 640 && w < 1024
   const showSidebar = w >= 1024
@@ -72,6 +85,7 @@ export default function App() {
 
   // Apply bg to body
   useEffect(() => { document.body.style.background = bg }, [bg])
+  useEffect(() => { document.title = TITLES[path] ?? 'Docket' }, [path])
 
   // Live API data
   const [apiData, setApiData] = useState(null)
@@ -120,6 +134,7 @@ export default function App() {
   }
 
   return (
+    <ThemeContext.Provider value={{ accent, cardRadius, isMobile }}>
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: bg }}>
       {/* Bottom-right bloom */}
       <div style={{
@@ -138,9 +153,16 @@ export default function App() {
         accent={accent}
         isMobile={isMobile}
         isTablet={isTablet}
-        onSidebarToggle={!showSidebar ? () => setSidebarOpen(o => !o) : null}
+        onSidebarToggle={!showSidebar && path === '/' ? () => setSidebarOpen(o => !o) : null}
         apiData={topBarData}
       />
+      {isMobile && <Nav accent={accent} row />}
+
+      {path !== '/' ? (
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', zIndex: 1 }}>
+          {View ? <View /> : <ViewShell title="Not found" subtitle={`nothing at ${path}`} />}
+        </div>
+      ) : (
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', zIndex: 1 }}>
         {/* Main content */}
@@ -298,6 +320,9 @@ export default function App() {
           </>
         )}
       </div>
+      )}
+      <Toaster />
     </div>
+    </ThemeContext.Provider>
   )
 }

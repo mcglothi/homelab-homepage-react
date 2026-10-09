@@ -3,6 +3,8 @@ import { PlexNowPlaying } from './PlexNowPlaying'
 import { DownloadTicker } from './DownloadTicker'
 import { OverseerrBadge } from './OverseerrBadge'
 import { TopBarPill } from '../shared/TopBarPill'
+import { DocketMark } from './DocketMark'
+import { Nav } from './Nav'
 
 export function TopBar({ accent, isMobile, isTablet, onSidebarToggle, apiData }) {
   const { hh, mm, ss, ampm, dateStr } = useClock()
@@ -15,18 +17,10 @@ export function TopBar({ accent, isMobile, isTablet, onSidebarToggle, apiData })
       background: 'rgba(8,8,8,0.92)', backdropFilter: 'blur(16px)',
       position: 'sticky', top: 0, zIndex: 10, gap: 8, flexShrink: 0,
     }}>
-      {/* Left — branding */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-        <div style={{
-          width: 8, height: 8, borderRadius: '50%',
-          background: accent, boxShadow: `0 0 10px ${accent}`,
-        }} />
-        <span style={{
-          fontFamily: "'JetBrains Mono',monospace",
-          fontSize: isMobile ? 11 : 13, color: accent, letterSpacing: 2,
-        }}>
-          {isMobile ? 'home' : 'home.timmcg.net'}
-        </span>
+      {/* Left — Docket mark + tabs (tabs move to a row under the bar on mobile) */}
+      <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+        <DocketMark accent={accent} compact={isMobile} />
+        {!isMobile && <Nav accent={accent} />}
       </div>
 
       {/* Center — now playing + status pills */}
