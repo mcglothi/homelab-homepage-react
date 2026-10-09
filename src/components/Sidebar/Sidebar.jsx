@@ -5,6 +5,7 @@ import { PowerWidget } from './PowerWidget'
 import { AdGuardDonut } from './PiHoleDonut'
 import { NetworkStats } from './NetworkStats'
 import { QuickLinks } from './QuickLinks'
+import { NeedsAttention } from './NeedsAttention'
 
 export function Sidebar({ accent, apiData }) {
   return (
@@ -14,6 +15,7 @@ export function Sidebar({ accent, apiData }) {
       display: 'flex', flexDirection: 'column', gap: 16,
       background: 'rgba(255,255,255,0.01)', flexShrink: 0,
     }}>
+      <NeedsAttention accent={accent} />
       <StatTiles adguard={apiData?.adguard} weather={apiData?.weather} />
       <CalendarWidget accent={accent} events={apiData?.calendarEvents} />
       <GrafanaWidget accent={accent} data={apiData?.grafana} />

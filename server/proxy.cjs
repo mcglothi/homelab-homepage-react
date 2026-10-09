@@ -34,6 +34,9 @@ const ADGUARD_PASSWORD = process.env.ADGUARD_PASSWORD || ''
 const PROMETHEUS_URL  = process.env.PROMETHEUS_URL   || 'http://10.10.10.10:30028'
 const GRAFANA_URL     = process.env.GRAFANA_URL      || 'http://10.10.10.10:3000'
 const OPENSOAK_URL    = process.env.OPENSOAK_URL      || 'https://opensoak.home.timmcg.net'
+// Docket tab feeds on Turing
+const WATCH_URL       = process.env.WATCH_URL        || 'http://10.10.10.50:8790'
+const AIKB_HEALTH_URL = process.env.AIKB_HEALTH_URL  || 'http://10.10.10.50:8791'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -249,6 +252,25 @@ app.post('/api/media-sweep/toggle', apiRoute(async () => {
   }
   return { enabled: !fs.existsSync(SWEEP_FLAG) }
 }))
+
+// ── Docket tabs: Turing feeds, passed straight through ───────────────────────
+// /api/watch/* → watch (:8790), /api/aikb/* → aikb_health (:8791). Bodies and status
+// codes are relayed as-is so the views can show upstream errors.
+function passthrough(base, timeoutMs) {
+  return (req, res) => {
+    const upstream = http.request(new URL(req.originalUrl, base), { method: req.method, headers: { accept: 'application/json' } }, up => {
+      res.status(up.statusCode)
+      res.set('content-type', up.headers['content-type'] || 'application/json')
+      up.pipe(res)
+    })
+    upstream.on('error', e => { if (!res.headersSent) res.status(502).json({ error: e.message }) })
+    upstream.setTimeout(timeoutMs, () => upstream.destroy(new Error('upstream timeout')))
+    upstream.end()
+  }
+}
+app.get('/api/watch/*', passthrough(WATCH_URL, 20000))
+app.post('/api/watch/*', passthrough(WATCH_URL, 20000))
+app.get('/api/aikb/*', passthrough(AIKB_HEALTH_URL, 30000))
 
 // ── Static files (production) ─────────────────────────────────────────────────
 const distPath = path.join(__dirname, '../dist')
