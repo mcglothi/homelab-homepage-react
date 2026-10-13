@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { C, MONO, SANS } from '../../ui/theme'
 import { Button, Pill, TextInput, toast } from '../../ui/primitives'
 import { ago, duration, getJSON, postJSON, useFeed } from '../../api/feeds'
@@ -8,6 +8,8 @@ import { AlertList, Card, Columns, FeedBadge, Muted, Row, Tile, Tiles, ViewShell
 // The review queue is the borderline pile (triage score 1): Promote writes an AIKB
 // note (takes ~1 min in the background), Dismiss clears it. Nothing is ever lost —
 // the ledger keeps every video and its transcript, which the search box covers.
+// Sync now starts the same systemd run the 2h timer does; watch refuses it while a run
+// is going or within a few minutes of the last one (YouTube rate-limits).
 
 const GH = 'https://github.com/mcglothi/AIKB/blob/main/'
 const yt = (id, t) => `https://www.youtube.com/watch?v=${id}${t ? `&t=${t}s` : ''}`
@@ -15,15 +17,43 @@ const STATUS_COLOR = { kept: C.green, borderline: C.violet, dropped: C.dim, skip
   new: C.blue, error: C.red, unavailable: C.faint, dismissed: C.faint, promoting: C.amber }
 
 export default function WatchView() {
-  const status = useFeed('/api/watch/status', 30000)
+  const [requested, setRequested] = useState(0) // when Sync now was clicked; 0 once the run shows up
+  const [running, setRunning] = useState(false)
+  const status = useFeed('/api/watch/status', requested || running ? 5000 : 30000)
   const queue = useFeed('/api/watch/queue?limit=50', 60000)
   const recent = useFeed('/api/watch/recent?status=kept&limit=25', 60000)
   const runs = useFeed('/api/watch/runs?limit=8', 60000)
   const s = status.data
 
+  useEffect(() => {
+    if (!s) return
+    if (s.sync_running) setRequested(0)
+    else if (running) { queue.reload(); recent.reload(); runs.reload() } // a run just finished
+    else if (requested && Date.now() - requested > 30000) setRequested(0) // never showed up
+    setRunning(!!s.sync_running)
+  }, [s]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const syncNow = async () => {
+    try {
+      await postJSON('/api/watch/sync')
+      setRequested(Date.now())
+      toast('Sync started — new videos land as they are processed')
+      setTimeout(status.reload, 1500)
+    } catch (e) {
+      toast(`Sync not started: ${e.message}`)
+    }
+  }
+
   return (
     <ViewShell title="Watch" subtitle="YouTube → AIKB · history, likes and the AIKB playlist, every 2h on Turing"
-      right={<FeedBadge feed={status} name="watch" />}>
+      right={
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <FeedBadge feed={status} name="watch" />
+          <Button variant="primary" disabled={!s || running || !!requested} onClick={syncNow}>
+            {running ? 'Syncing…' : requested ? 'Starting…' : 'Sync now'}
+          </Button>
+        </div>
+      }>
       {s && <Summary s={s} />}
       <Columns>
         <Queue feed={queue} onChange={() => { queue.reload(); recent.reload(); status.reload() }} />
