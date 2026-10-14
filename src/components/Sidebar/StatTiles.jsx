@@ -1,7 +1,7 @@
 export function StatTiles({ adguard, weather }) {
   const stats = [
-    { label: 'DNS BLOCK', val: `${adguard?.blocked ?? '89'}%`, color: '#39ff5a' },
-    { label: 'WEATHER', val: `${weather?.temp ?? '52'}°F`, color: '#00bfff' },
+    { label: 'DNS BLOCK', val: adguard?.blocked != null ? `${adguard.blocked}%` : '—', color: '#39ff5a' },
+    { label: 'WEATHER', val: weather?.temp != null ? `${weather.temp}°F` : '—', color: '#00bfff' },
   ]
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>

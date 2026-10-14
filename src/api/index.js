@@ -240,9 +240,13 @@ export async function fetchCalendarEvents() {
   return Object.keys(events).length > 0 ? events : null
 }
 
+// ── Health + weather (proxy-side, cached) ────────────────────────────────────
+export const fetchHealth = () => get('/api/health')
+export const fetchWeather = () => get('/api/weather')
+
 // ── Top-level poller ──────────────────────────────────────────────────────────
 export async function fetchAllData() {
-  const [plex, tautulli, overseerr, sonarr, radarr, prowlarr, sabnzbd, transmission, adguard, prometheus, grafana, opensoak, calendarEvents] =
+  const [plex, tautulli, overseerr, sonarr, radarr, prowlarr, sabnzbd, transmission, adguard, prometheus, grafana, opensoak, calendarEvents, health, weather] =
     await Promise.allSettled([
       fetchPlex(),
       fetchTautulli(),
@@ -257,6 +261,8 @@ export async function fetchAllData() {
       fetchGrafana(),
       fetchOpenSoak(),
       fetchCalendarEvents(),
+      fetchHealth(),
+      fetchWeather(),
     ])
 
   const ok = r => (r.status === 'fulfilled' ? r.value : null)
@@ -275,5 +281,7 @@ export async function fetchAllData() {
     grafana: ok(grafana),
     opensoak: ok(opensoak),
     calendarEvents: ok(calendarEvents),
+    health: ok(health),
+    weather: ok(weather),
   }
 }
