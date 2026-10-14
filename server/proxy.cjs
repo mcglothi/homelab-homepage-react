@@ -37,6 +37,9 @@ const OPENSOAK_URL    = process.env.OPENSOAK_URL      || 'https://opensoak.home.
 // Docket tab feeds on Turing
 const WATCH_URL       = process.env.WATCH_URL        || 'http://10.10.10.50:8790'
 const AIKB_HEALTH_URL = process.env.AIKB_HEALTH_URL  || 'http://10.10.10.50:8791'
+// Weather for the top bar and sidebar tile (Open-Meteo, no key)
+const WEATHER_LAT     = process.env.WEATHER_LAT      || '43.93'
+const WEATHER_LON     = process.env.WEATHER_LON      || '-69.97'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -93,6 +96,40 @@ function fetchLocalPost(url, body, headers = {}) {
     req.on('error', reject)
     req.setTimeout(5000, () => { req.destroy(); reject(new Error('timeout')) })
     req.write(bodyStr)
+    req.end()
+  })
+}
+
+// TTL cache with single-flight, so every open tab doesn't trigger its own round of probes
+function cached(ttlMs, fn) {
+  let value = null, at = 0, inflight = null
+  return () => {
+    if (value && Date.now() - at < ttlMs) return Promise.resolve(value)
+    if (!inflight) {
+      inflight = fn()
+        .then(v => { value = v; at = Date.now(); return v })
+        .finally(() => { inflight = null })
+    }
+    return inflight
+  }
+}
+
+// Status code + TLS expiry for one URL; redirects are not followed (a 302 to a login page is "up")
+function probe(url) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url)
+    const lib = u.protocol === 'https:' ? https : http
+    const req = lib.request({
+      hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80),
+      path: u.pathname + u.search, method: 'GET', headers: { Accept: '*/*' }, rejectUnauthorized: false,
+    }, res => {
+      // Grab the cert before the socket is released back to the agent
+      const certExpires = res.socket?.getPeerCertificate?.()?.valid_to ?? null
+      res.resume()
+      resolve({ status: res.statusCode, certExpires })
+    })
+    req.on('error', reject)
+    req.setTimeout(5000, () => { req.destroy(new Error('timeout')) })
     req.end()
   })
 }
@@ -252,6 +289,39 @@ app.post('/api/media-sweep/toggle', apiRoute(async () => {
   }
   return { enabled: !fs.existsSync(SWEEP_FLAG) }
 }))
+
+// ── Health: reachability for every service card ──────────────────────────────
+// The catalog is src/services.js (ESM, shared with the front end; the Dockerfile copies it in).
+// Any HTTP response below 500, including a 401/403 login wall, counts as up.
+const catalog = import(require('url').pathToFileURL(path.join(__dirname, '../src/services.js')).href)
+  .then(m => Object.values(m.SERVICES).flat())
+catalog.catch(e => console.error(`health: cannot load service catalog: ${e.message}`)) // don't crash on start
+
+const getHealth = cached(60_000, async () => {
+  const services = await catalog
+  const results = await Promise.all(services.map(async s => {
+    const start = Date.now()
+    try {
+      const res = await probe(s.href)
+      const certDays = res.certExpires ? Math.floor((new Date(res.certExpires) - Date.now()) / 864e5) : null
+      return [s.name, { online: res.status < 500, status: res.status, ms: Date.now() - start, certDays }]
+    } catch (e) {
+      // Connection failures over several addresses arrive as an AggregateError with an empty message
+      return [s.name, { online: false, error: e.message || e.code || e.errors?.[0]?.code || 'unreachable' }]
+    }
+  }))
+  return { checkedAt: new Date().toISOString(), services: Object.fromEntries(results) }
+})
+app.get('/api/health', apiRoute(() => getHealth()))
+
+const getWeather = cached(10 * 60_000, async () => {
+  const d = await fetchLocal(`https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}` +
+    '&current=temperature_2m&temperature_unit=fahrenheit')
+  const t = d?.current?.temperature_2m
+  if (t == null) throw new Error('open-meteo: no temperature')
+  return { temp: Math.round(t), at: d.current.time }
+})
+app.get('/api/weather', apiRoute(() => getWeather()))
 
 // ── Docket tabs: Turing feeds, passed straight through ───────────────────────
 // /api/watch/* → watch (:8790), /api/aikb/* → aikb_health (:8791). Bodies and status

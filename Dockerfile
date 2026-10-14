@@ -16,6 +16,9 @@ RUN cd server && npm ci --production
 COPY --from=builder /app/dist ./dist
 # Proxy server
 COPY server/proxy.cjs ./server/proxy.cjs
+# Service catalog, read by the proxy's health probe (package.json marks src/*.js as ESM)
+COPY package.json ./
+COPY src/services.js ./src/services.js
 EXPOSE 3010
 ENV PORT=3010 NODE_ENV=production
 CMD ["node", "server/proxy.cjs"]

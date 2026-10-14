@@ -40,10 +40,10 @@ const BG_PRESETS = [
   { color: '#061414', label: 'Teal' },
 ]
 
-// Map live API data to per-service detail overrides
+// Map live API data to per-service detail overrides, plus each card's probe result
 function buildServiceData(apiData) {
   if (!apiData) return {}
-  return {
+  const live = {
     Plex: apiData.plex,
     Tautulli: apiData.tautulli,
     Overseerr: apiData.overseerr,
@@ -56,6 +56,11 @@ function buildServiceData(apiData) {
     Prometheus: apiData.prometheus,
     OpenSoak: apiData.opensoak,
   }
+  const health = apiData.health?.services ?? {}
+  return Object.fromEntries(Object.values(SERVICES).flat().map(svc => {
+    const h = health[svc.name]
+    return [svc.name, { ...live[svc.name], online: h?.online ?? null, latency: h?.ms, certDays: h?.certDays, error: h?.error }]
+  }))
 }
 
 export default function App() {

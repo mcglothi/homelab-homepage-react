@@ -53,12 +53,19 @@ export function ServiceCard({ svc, accent, cardRadius = 12, entranceDelay = 0, l
               color: hovered ? '#fff' : '#ccc',
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>{svc.name}</span>
-            <StatusDot online={liveData?.online ?? true} />
+            <StatusDot online={liveData?.online ?? null} title={dotTitle(liveData)} />
           </div>
           <div style={{
             fontSize: 11, color: '#555', fontFamily: "'JetBrains Mono',monospace",
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>{svc.desc}</div>
+          }}>
+            {liveData?.certDays != null && liveData.certDays < 30 && (
+              <span title="TLS certificate expiry" style={{ color: liveData.certDays < 7 ? '#ff4d4f' : '#ffab00' }}>
+                cert {liveData.certDays}d ·{' '}
+              </span>
+            )}
+            {svc.desc}
+          </div>
         </div>
       </div>
       {details && details.length > 0 && (
@@ -84,4 +91,13 @@ export function ServiceCard({ svc, accent, cardRadius = 12, entranceDelay = 0, l
       )}
     </a>
   )
+}
+
+function dotTitle(d) {
+  if (d?.online === true) {
+    const parts = ['up', d.latency != null && `${d.latency}ms`, d.certDays != null && `cert ${d.certDays}d`]
+    return parts.filter(Boolean).join(' · ')
+  }
+  if (d?.online === false) return `unreachable${d.error ? `: ${d.error}` : ''}`
+  return 'not checked yet'
 }

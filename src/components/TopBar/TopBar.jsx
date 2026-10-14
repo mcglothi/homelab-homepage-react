@@ -41,11 +41,11 @@ export function TopBar({ accent, isMobile, isTablet, onSidebarToggle, apiData })
         {!isMobile && (
           <div style={{ display: 'flex', gap: 8 }}>
             <TopBarPill color="#39ff5a30" textColor="#39ff5a">
-              dns {apiData?.adguard?.blocked ?? '89'}%
+              dns {apiData?.adguard?.blocked != null ? `${apiData.adguard.blocked}%` : '—'}
             </TopBarPill>
             {!isTablet && (
               <TopBarPill>
-                {apiData?.weather?.temp ?? '52'}°F · Topsham ME
+                {apiData?.weather?.temp != null ? `${apiData.weather.temp}°F` : '—'} · Topsham ME
               </TopBarPill>
             )}
           </div>
