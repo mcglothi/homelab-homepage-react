@@ -116,9 +116,10 @@ export const SERVICES = {
       details: [{ k: 'Role', v: 'secondary' }, { k: 'Blocked', v: '—%' }],
     },
     {
-      name: 'Tailscale', desc: 'VPN Mesh Network', color: '#246bfd',
-      href: 'https://login.tailscale.com/admin',
-      details: [{ k: 'Status', v: 'connected' }, { k: 'Peers', v: '—' }, { k: 'Exit node', v: 'none' }],
+      // Self-hosted control server; hosts/DNS on our machines block Tailscale's own service
+      name: 'Headscale', desc: 'Tailnet control server', color: '#246bfd',
+      href: 'https://hs.timmcg.net',
+      details: [],
     },
     {
       name: 'MinIO', desc: 'S3 Object Storage', color: '#c72e49',

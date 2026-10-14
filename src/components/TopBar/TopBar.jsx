@@ -29,9 +29,10 @@ export function TopBar({ accent, isMobile, isTablet, onSidebarToggle, apiData })
           <PlexNowPlaying data={apiData?.plex} />
           {!isTablet && <DownloadTicker data={apiData?.sabnzbd} />}
           {!isTablet && <OverseerrBadge data={apiData?.overseerr} />}
+          {/* Tailnet control server reachability (peer count would need a headscale API key) */}
           <TopBarPill color="#246bfd40" textColor="#246bfd" glow>
-            <span style={{ fontSize: 9 }}>●</span>
-            Tailscale{!isTablet && ` · ${apiData?.tailscale?.peers ?? 6} peers`}
+            <span style={{ fontSize: 9, color: apiData?.headscale?.online === true ? '#39ff5a' : apiData?.headscale?.online === false ? '#ff4d4f' : '#555' }}>●</span>
+            headscale
           </TopBarPill>
         </div>
       )}
