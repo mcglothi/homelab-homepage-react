@@ -136,6 +136,7 @@ export default function App() {
     overseerr: apiData?.overseerr,
     adguard: apiData?.adguard,
     weather: apiData?.weather,
+    headscale: apiData?.health?.services?.Headscale,
   }
 
   return (
