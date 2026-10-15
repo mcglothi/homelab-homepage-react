@@ -31,7 +31,9 @@ const TRANSMISSION_URL = process.env.TRANSMISSION_URL || 'http://10.10.10.10:300
 const ADGUARD_URL      = process.env.ADGUARD_URL      || 'http://10.10.10.10:3000'  // host networking since 2026-09-25
 const ADGUARD_USER     = process.env.ADGUARD_USER     || 'admin'
 const ADGUARD_PASSWORD = process.env.ADGUARD_PASSWORD || ''
-const PROMETHEUS_URL  = process.env.PROMETHEUS_URL   || 'http://10.10.10.10:30028'
+const PROMETHEUS_URL  = process.env.PROMETHEUS_URL   || 'http://10.10.10.10:9090'
+const SENSELESS_URL   = process.env.SENSELESS_URL    || 'http://10.10.10.10:8780'
+const LOCAL_TZ        = process.env.DASHBOARD_TZ     || 'America/New_York'
 const GRAFANA_URL     = process.env.GRAFANA_URL      || 'http://10.10.10.10:3000'
 const OPENSOAK_URL    = process.env.OPENSOAK_URL      || 'https://opensoak.home.timmcg.net'
 // Docket tab feeds on Turing
@@ -256,6 +258,45 @@ app.get('/api/grafana/metrics', apiRoute(async () => {
     }
   } catch {
     return null
+  }
+}))
+
+// Power — live draw from Senseless, today's history/stats from Prometheus.
+// History falls back to the legacy sense-exporter series until Senseless has a full day.
+const POWER_EXPR = '(max(senseless_power_watts) or max(sense_active_power_watts))'
+
+function secondsSinceLocalMidnight(tz) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date()).map(p => [p.type, p.value]))
+  return (parseInt(parts.hour, 10) % 24) * 3600 + parseInt(parts.minute, 10) * 60 + parseInt(parts.second, 10)
+}
+
+app.get('/api/power', apiRoute(async () => {
+  const now = Math.floor(Date.now() / 1000)
+  const sinceMidnight = Math.max(60, secondsSinceLocalMidnight(LOCAL_TZ))
+  const q = (expr) => fetchLocal(`${PROMETHEUS_URL}/api/v1/query?query=${encodeURIComponent(expr)}`)
+  const scalar = (res) => {
+    const v = parseFloat(res?.data?.result?.[0]?.value?.[1])
+    return isNaN(v) ? null : v
+  }
+  const [status, peakRes, avgRes, histRes] = await Promise.all([
+    fetchLocal(`${SENSELESS_URL}/api/status`).catch(() => null),
+    q(`max_over_time(${POWER_EXPR}[${sinceMidnight}s:1m])`).catch(() => null),
+    q(`avg_over_time(${POWER_EXPR}[${sinceMidnight}s:1m])`).catch(() => null),
+    fetchLocal(`${PROMETHEUS_URL}/api/v1/query_range?query=${encodeURIComponent(`avg_over_time(${POWER_EXPR}[1h:1m])`)}&start=${now - sinceMidnight + 3600}&end=${now}&step=3600`).catch(() => null),
+  ])
+  const history = (histRes?.data?.result?.[0]?.values ?? []).map(([, v]) => Math.round(parseFloat(v))).filter(n => !isNaN(n))
+  const latest = status?.latest ?? {}
+  const avg = scalar(avgRes)
+  return {
+    live: status?.healthy ?? false,
+    current: latest.w != null ? Math.round(latest.w) : null,
+    legs: Array.isArray(latest.channels) ? latest.channels.map(w => Math.round(w)) : null,
+    peak: scalar(peakRes) != null ? Math.round(scalar(peakRes)) : null,
+    avg: avg != null ? Math.round(avg) : null,
+    kwh: avg != null ? Math.round(avg * sinceMidnight / 3600 / 100) / 10 : null,
+    history: history.length ? history : null,
   }
 }))
 

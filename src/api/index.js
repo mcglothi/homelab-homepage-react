@@ -188,6 +188,9 @@ export async function fetchGrafana() {
   return data ?? null
 }
 
+// ── Power (Senseless) ─────────────────────────────────────────────────────────
+export const fetchPower = () => get('/api/power')
+
 // ── OpenSoak ──────────────────────────────────────────────────────────────────
 export async function fetchOpenSoak() {
   const data = await get('/api/opensoak/status')
@@ -247,7 +250,7 @@ export const fetchWeather = () => get('/api/weather')
 
 // ── Top-level poller ──────────────────────────────────────────────────────────
 export async function fetchAllData() {
-  const [plex, tautulli, overseerr, sonarr, radarr, prowlarr, sabnzbd, transmission, adguard, prometheus, grafana, opensoak, calendarEvents, health, weather] =
+  const [plex, tautulli, overseerr, sonarr, radarr, prowlarr, sabnzbd, transmission, adguard, prometheus, grafana, opensoak, calendarEvents, health, weather, power] =
     await Promise.allSettled([
       fetchPlex(),
       fetchTautulli(),
@@ -264,6 +267,7 @@ export async function fetchAllData() {
       fetchCalendarEvents(),
       fetchHealth(),
       fetchWeather(),
+      fetchPower(),
     ])
 
   const ok = r => (r.status === 'fulfilled' ? r.value : null)
@@ -284,5 +288,6 @@ export async function fetchAllData() {
     calendarEvents: ok(calendarEvents),
     health: ok(health),
     weather: ok(weather),
+    power: ok(power),
   }
 }

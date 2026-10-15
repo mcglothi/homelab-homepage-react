@@ -1,32 +1,31 @@
-import { useState, useEffect } from 'react'
-
 export function PowerWidget({ accent, data }) {
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 2500)
-    return () => clearInterval(id)
-  }, [])
+  // Real data only: /api/power (Senseless live draw + Prometheus history). No placeholder values.
+  const powerHistory = data?.history ?? []
+  const currentW = data?.current ?? null
+  const peakW = data?.peak ?? null
+  const avgW = data?.avg ?? null
+  const dailyKwh = data?.kwh ?? null
+  const legs = data?.legs ?? null
+  const live = data?.live ?? false
+  const fmtW = (v) => (v == null ? '—' : `${v.toLocaleString()}W`)
 
-  const powerHistory = data?.history ?? [1840, 1920, 2100, 1780, 1650, 2340, 2890, 3100, 2760, 2400, 2100, 1980, 2200, 2450, 2280, 1990, 1870, 2050, 2380, 2710, 2560, 2200, 1980, 1840]
-  const currentW = data?.current ?? Math.floor(Math.sin(tick * 0.6) * 180 + 2280)
-  const peakW = data?.peak ?? 3100
-  const avgW = data?.avg ?? 2180
-  const dailyKwh = data?.kwh ?? 28.4
-
-  const barMax = Math.max(...powerHistory)
+  const barMax = Math.max(1, ...powerHistory)
   const gaugeMax = 4000
-  const gaugeProgress = Math.min(currentW / gaugeMax, 1)
+  const gaugeProgress = currentW == null ? 0 : Math.min(currentW / gaugeMax, 1)
   const r = 30
   const circ = Math.PI * r
   const dash = gaugeProgress * circ
 
-  const wColor = currentW > 3000 ? '#ff2d6b' : currentW > 2500 ? '#ff6b35' : accent
+  const wColor = currentW == null ? '#555' : currentW > 3000 ? '#ff2d6b' : currentW > 2500 ? '#ff6b35' : accent
 
   return (
     <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid #ffffff10', borderRadius: 12, padding: '14px 16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: '#ffab00', letterSpacing: 3, textTransform: 'uppercase' }}>Power</div>
-        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#333' }}>Sense · live</div>
+        <a href="https://sense.home.timmcg.net" target="_blank" rel="noreferrer"
+          style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: live ? '#39ff5a90' : '#ff2d6b', textDecoration: 'none' }}>
+          {live ? 'Sense · live' : 'Sense · stale'}
+        </a>
       </div>
 
       {/* Gauge + reading */}
@@ -48,17 +47,19 @@ export function PowerWidget({ accent, data }) {
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
             <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 26, fontWeight: 700, color: wColor, lineHeight: 1, transition: 'color 0.5s' }}>
-              {currentW.toLocaleString()}
+              {currentW == null ? '—' : currentW.toLocaleString()}
             </span>
             <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: '#555' }}>W</span>
           </div>
-          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', marginTop: 2 }}>current draw</div>
+          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', marginTop: 2 }}>
+            {legs ? `L1 ${legs[0].toLocaleString()} · L2 ${legs[1].toLocaleString()}` : 'current draw'}
+          </div>
         </div>
       </div>
 
       {/* 24h bar chart */}
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', letterSpacing: 1, marginBottom: 6 }}>24H HISTORY</div>
+        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', letterSpacing: 1, marginBottom: 6 }}>TODAY (HOURLY AVG)</div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 40 }}>
           {powerHistory.map((v, i) => {
             const h = Math.max(3, (v / barMax) * 38)
@@ -83,9 +84,9 @@ export function PowerWidget({ accent, data }) {
       {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
         {[
-          { label: 'PEAK', val: `${peakW.toLocaleString()}W`, color: '#ff6b35' },
-          { label: 'AVG', val: `${avgW.toLocaleString()}W`, color: '#ffab00' },
-          { label: 'TODAY', val: `${dailyKwh} kWh`, color: '#39ff5a' },
+          { label: 'PEAK', val: fmtW(peakW), color: '#ff6b35' },
+          { label: 'AVG', val: fmtW(avgW), color: '#ffab00' },
+          { label: 'TODAY', val: dailyKwh == null ? '—' : `${dailyKwh} kWh`, color: '#39ff5a' },
         ].map(s => (
           <div key={s.label} style={{ textAlign: 'center', background: 'rgba(255,255,255,0.02)', borderRadius: 6, padding: '6px 4px' }}>
             <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, color: '#444', letterSpacing: 1, marginBottom: 3 }}>{s.label}</div>

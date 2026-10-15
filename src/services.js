@@ -83,6 +83,11 @@ export const SERVICES = {
       href: 'http://opensoak.home.timmcg.net',
       details: [],
     },
+    {
+      name: 'Senseless', desc: 'Energy Monitor (Sense)', color: '#39ff5a',
+      href: 'https://sense.home.timmcg.net',
+      details: [{ k: 'Status', v: 'online' }],
+    },
   ],
   Infrastructure: [
     {
