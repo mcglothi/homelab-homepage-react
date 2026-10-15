@@ -1,3 +1,5 @@
+import { dateKey } from '../components/Sidebar/calendarDates.js'
+
 // All API calls go through /api/* — proxied to local services by the Express server
 // Falls back gracefully on error so the UI always renders
 
@@ -206,26 +208,25 @@ export async function fetchCalendarEvents() {
     get('/api/sonarr/calendar'),
     get('/api/radarr/calendar'),
   ])
-  // Build {dayOfMonth: [{color, label}]} for current month only
-  const now = new Date()
-  const currentMonth = now.getMonth()
-  const currentYear = now.getFullYear()
+  if (!Array.isArray(sonarr) && !Array.isArray(radarr)) return null
+  // Preserve full dates so selections and weeks can cross month/year boundaries.
   const events = {}
 
-  const addEvent = (dateStr, color, label) => {
+  const addEvent = (dateStr, color, label, type) => {
     if (!dateStr) return
-    const d = new Date(dateStr)
-    if (d.getMonth() !== currentMonth || d.getFullYear() !== currentYear) return
-    const day = d.getDate()
+    // Date-only releases belong to that calendar day, not UTC midnight.
+    const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? `${dateStr}T00:00:00` : dateStr)
+    if (Number.isNaN(d.getTime())) return
+    const day = dateKey(d)
     if (!events[day]) events[day] = []
-    events[day].push({ color, label })
+    events[day].push({ color, label, type })
   }
 
   if (Array.isArray(sonarr)) {
     sonarr.forEach(ep => {
       const seriesTitle = ep.series?.title ?? ep.seriesTitle ?? 'TV'
       const epLabel = `${seriesTitle} S${String(ep.seasonNumber).padStart(2,'0')}E${String(ep.episodeNumber).padStart(2,'0')}`
-      addEvent(ep.airDateUtc, '#35c5f4', epLabel)
+      addEvent(ep.airDateUtc, '#35c5f4', epLabel, 'tv')
     })
   }
 
@@ -233,11 +234,11 @@ export async function fetchCalendarEvents() {
     radarr.forEach(movie => {
       const label = movie.title ?? 'Movie'
       // Use physical release date (home video) if available, otherwise theatrical
-      addEvent(movie.physicalRelease ?? movie.digitalRelease ?? movie.inCinemas, '#ffc230', label)
+      addEvent(movie.physicalRelease ?? movie.digitalRelease ?? movie.inCinemas, '#ffc230', label, 'movie')
     })
   }
 
-  return Object.keys(events).length > 0 ? events : null
+  return events
 }
 
 // ── Health + weather (proxy-side, cached) ────────────────────────────────────

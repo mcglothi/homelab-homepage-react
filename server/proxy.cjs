@@ -178,8 +178,9 @@ app.get('/api/sonarr/queue', apiRoute(() =>
   fetchLocal(`${SONARR_URL}/api/v3/queue?apikey=${SONARR_KEY}&pageSize=1`)
 ))
 app.get('/api/sonarr/calendar', apiRoute(() => {
-  const start = new Date(); start.setDate(1)
-  const end = new Date(start.getFullYear(), start.getMonth() + 2, 0)
+  const now = new Date()
+  const start = new Date(Date.UTC(now.getFullYear(), now.getMonth() - 1, 1))
+  const end = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 2, 0))
   return fetchLocal(`${SONARR_URL}/api/v3/calendar?apikey=${SONARR_KEY}&start=${start.toISOString().split('T')[0]}&end=${end.toISOString().split('T')[0]}&includeSeries=true`)
 }))
 
@@ -191,8 +192,9 @@ app.get('/api/radarr/movies', apiRoute(() =>
   fetchLocal(`${RADARR_URL}/api/v3/movie?apikey=${RADARR_KEY}`)
 ))
 app.get('/api/radarr/calendar', apiRoute(() => {
-  const start = new Date(); start.setDate(1)
-  const end = new Date(start.getFullYear(), start.getMonth() + 2, 0)
+  const now = new Date()
+  const start = new Date(Date.UTC(now.getFullYear(), now.getMonth() - 1, 1))
+  const end = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 2, 0))
   return fetchLocal(`${RADARR_URL}/api/v3/calendar?apikey=${RADARR_KEY}&start=${start.toISOString().split('T')[0]}&end=${end.toISOString().split('T')[0]}`)
 }))
 

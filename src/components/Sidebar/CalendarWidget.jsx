@@ -1,103 +1,98 @@
 import { useState } from 'react'
+import { dateKey, dateFromKey, weekKeys, toggleDate } from './calendarDates'
+import './CalendarWidget.css'
 
 const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+const shortDate = key => dateFromKey(key).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
 export function CalendarWidget({ accent, events: eventsData }) {
   const now = new Date()
+  const today = dateKey(now)
   const [offset, setOffset] = useState(0)
+  const [selected, setSelected] = useState([])
   const viewing = new Date(now.getFullYear(), now.getMonth() + offset, 1)
-  const firstDay = viewing.getDay()
   const daysInMonth = new Date(viewing.getFullYear(), viewing.getMonth() + 1, 0).getDate()
+  const thisWeek = weekKeys(now)
+  const activeDays = selected.length ? selected : thisWeek
+  const events = eventsData ?? {}
+  const groups = activeDays.filter(key => events[key]?.length).map(key => ({ key, releases: events[key] }))
+  const releaseCount = groups.reduce((total, group) => total + group.releases.length, 0)
+  const cells = Array.from({ length: viewing.getDay() }, () => null)
+  for (let day = 1; day <= daysInMonth; day++) cells.push(dateKey(new Date(viewing.getFullYear(), viewing.getMonth(), day)))
+  while (cells.length % 7) cells.push(null)
 
-  const cells = []
-  for (let i = 0; i < firstDay; i++) cells.push(null)
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
-  while (cells.length % 7 !== 0) cells.push(null)
-
-  const isCurrentMonth = offset === 0
-  const td = now.getDate()
-
-  // Live events from sonarr/radarr or fallback to placeholder
-  const events = isCurrentMonth
-    ? (eventsData ?? {
-        [td + 3]: [{ color: '#35c5f4', label: 'Sonarr release' }],
-        [td + 5]: [{ color: '#ffc230', label: 'Radarr release' }],
-      })
-    : {}
-
-  const monthName = viewing.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  const resetWeek = () => { setSelected([]); setOffset(0) }
+  const heading = selected.length === 1 ? shortDate(selected[0]) : selected.length ? `${selected.length} selected days` : 'This week'
 
   return (
-    <div style={{
-      background: 'rgba(255,255,255,0.03)', border: '1px solid #ffffff10',
-      borderRadius: 12, padding: '18px 16px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: accent, letterSpacing: 3, textTransform: 'uppercase' }}>Calendar</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            onClick={() => setOffset(o => o - 1)}
-            style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '0 2px' }}
-          >‹</button>
-          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: '#555', minWidth: 110, textAlign: 'center' }}>
-            {monthName}
-          </div>
-          <button
-            onClick={() => setOffset(o => o + 1)}
-            style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '0 2px' }}
-          >›</button>
-        </div>
+    <section className="release-calendar" style={{ '--calendar-accent': accent }} aria-label="Media release calendar">
+      <div className="calendar-title-row">
+        <h2>Releases</h2>
+        <button className={`calendar-week-button ${!selected.length && offset === 0 ? 'is-active' : ''}`} onClick={resetWeek}>This week</button>
       </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 2, marginBottom: 4 }}>
-        {DAY_LABELS.map(d => (
-          <div key={d} style={{ textAlign: 'center', fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', paddingBottom: 6 }}>{d}</div>
-        ))}
+      <div className="calendar-month-row">
+        <button className="calendar-nav" aria-label="Previous month" disabled={offset === -1} onClick={() => setOffset(o => o - 1)}>‹</button>
+        <h3>{viewing.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
+        <button className="calendar-nav" aria-label="Next month" disabled={offset === 1} onClick={() => setOffset(o => o + 1)}>›</button>
       </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3 }}>
-        {cells.map((d, i) => {
-          const isToday = isCurrentMonth && d === td
-          const evs = d ? events[d] : null
+      <div className="calendar-grid calendar-weekdays" aria-hidden="true">
+        {DAY_LABELS.map(day => <span key={day}>{day}</span>)}
+      </div>
+      <div className="calendar-grid" role="group" aria-label="Choose release dates">
+        {cells.map((key, index) => {
+          if (!key) return <span key={`blank-${index}`} />
+          const releases = events[key] ?? []
+          const colors = [...new Set(releases.map(event => event.color))]
+          const isToday = key === today
+          const isSelected = selected.includes(key)
+          const inWeek = !selected.length && thisWeek.includes(key)
+          const label = dateFromKey(key).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
           return (
-            <div key={i} style={{
-              textAlign: 'center', borderRadius: 6, padding: '5px 2px 4px',
-              background: isToday ? accent + '28' : 'transparent',
-              border: isToday ? `1px solid ${accent}60` : '1px solid transparent',
-              cursor: d ? 'pointer' : 'default',
-              minHeight: 32,
-              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
-            }}>
-              {d && (
-                <span style={{
-                  fontSize: 11, color: isToday ? '#fff' : '#666',
-                  fontWeight: isToday ? 700 : 400,
-                  fontFamily: "'JetBrains Mono',monospace", lineHeight: 1,
-                }}>{d}</span>
-              )}
-              {evs && evs.map((e, ei) => (
-                <div key={ei} style={{ width: 4, height: 4, borderRadius: '50%', background: e.color, boxShadow: `0 0 4px ${e.color}` }} />
-              ))}
-            </div>
+            <button key={key}
+              className={`calendar-day ${isToday ? 'is-today' : ''} ${isSelected ? 'is-selected' : ''} ${inWeek ? 'in-week' : ''}`}
+              aria-label={`${label}, ${releases.length} ${releases.length === 1 ? 'release' : 'releases'}`}
+              aria-pressed={isSelected} aria-current={isToday ? 'date' : undefined}
+              title={`${label} · ${releases.length} ${releases.length === 1 ? 'release' : 'releases'}`}
+              onClick={() => setSelected(days => toggleDate(days, key))}>
+              <span>{dateFromKey(key).getDate()}</span>
+              <span className="calendar-markers" aria-hidden="true">
+                {colors.map(color => <i key={color} style={{ background: color }} />)}
+              </span>
+            </button>
           )
         })}
       </div>
-
-      {Object.keys(events).length > 0 && (
-        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #ffffff08', display: 'flex', flexDirection: 'column', gap: 7 }}>
-          {Object.entries(events).map(([day, evs]) =>
-            evs.map((e, i) => (
-              <div key={`${day}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ width: 2, height: 14, background: e.color, borderRadius: 2, flexShrink: 0 }} />
-                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: '#888' }}>{e.label}</span>
-                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', marginLeft: 'auto' }}>
-                  +{parseInt(day) - td}d
-                </span>
-              </div>
-            ))
-          )}
+      <div className="calendar-guide">
+        <span>Click days to {selected.length ? 'add or remove' : 'select'}.</span>
+        <span className="calendar-legend"><i style={{ background: '#35c5f4' }} />TV<i style={{ background: '#ffc230' }} />Film</span>
+      </div>
+      {selected.length > 0 && (
+        <div className="calendar-selection" aria-label="Selected dates">
+          {selected.map(key => <button key={key} aria-label={`Remove ${shortDate(key)} from selection`} onClick={() => setSelected(days => toggleDate(days, key))}>{shortDate(key)} <span aria-hidden="true">×</span></button>)}
         </div>
       )}
-    </div>
+      <div className="calendar-agenda" aria-live="polite" aria-atomic="true">
+        <div className="calendar-agenda-heading">
+          <h3>{heading}</h3>
+          <span>{releaseCount} {releaseCount === 1 ? 'release' : 'releases'}</span>
+        </div>
+        {!selected.length && <p className="calendar-range">{shortDate(thisWeek[0])} – {shortDate(thisWeek[6])}</p>}
+        {eventsData == null ? <p className="calendar-empty">{eventsData === undefined ? 'Loading releases…' : 'Release data is unavailable right now.'}</p> : groups.length === 0 ? <p className="calendar-empty">No releases {selected.length ? 'on the selected days' : 'this week'}. Try another date.</p> : (
+          <div className="calendar-release-list" tabIndex={0} aria-label="Releases for displayed dates">
+            {groups.map(({ key, releases }) => (
+              <div className="calendar-release-group" key={key}>
+                <h4>{dateFromKey(key).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}{key === today && <span>Today</span>}</h4>
+                {releases.map((release, index) => (
+                  <div className="calendar-release" key={`${key}-${index}`} style={{ '--release-color': release.color }}>
+                    <span className="calendar-release-type">{release.type === 'movie' ? 'FILM' : 'TV'}</span>
+                    <span>{release.label}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
