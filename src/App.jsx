@@ -70,6 +70,7 @@ export default function App() {
   const View = path === '/' ? null : VIEWS[path]
   const isMobile = w < 640
   const isTablet = w >= 640 && w < 1024
+  const navInRow = w < 1024
   const showSidebar = w >= 1024
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -160,10 +161,11 @@ export default function App() {
         accent={accent}
         isMobile={isMobile}
         isTablet={isTablet}
+        navInRow={navInRow}
         onSidebarToggle={!showSidebar && path === '/' ? () => setSidebarOpen(o => !o) : null}
         apiData={topBarData}
       />
-      {isMobile && <Nav accent={accent} row />}
+      {navInRow && <Nav accent={accent} row />}
 
       {path !== '/' ? (
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', zIndex: 1 }}>

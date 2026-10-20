@@ -8,7 +8,7 @@ export function Nav({ accent, row }) {
   return (
     <nav style={row
       ? { display: 'flex', gap: 2, padding: '6px 10px', borderBottom: '1px solid #ffffff10', background: 'rgba(8,8,8,0.92)', overflowX: 'auto' }
-      : { display: 'flex', gap: 2, marginLeft: 18 }}>
+      : { display: 'flex', gap: 2, marginLeft: 18, minWidth: 0, overflowX: 'auto' }}>
       {NAV.map(([label, href]) => {
         const on = href === here
         return (

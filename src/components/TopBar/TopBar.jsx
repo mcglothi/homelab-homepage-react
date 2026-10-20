@@ -6,7 +6,7 @@ import { TopBarPill } from '../shared/TopBarPill'
 import { DocketMark } from './DocketMark'
 import { Nav } from './Nav'
 
-export function TopBar({ accent, isMobile, isTablet, onSidebarToggle, apiData }) {
+export function TopBar({ accent, isMobile, isTablet, navInRow, onSidebarToggle, apiData }) {
   const { hh, mm, ss, ampm, dateStr } = useClock()
 
   return (
@@ -17,10 +17,10 @@ export function TopBar({ accent, isMobile, isTablet, onSidebarToggle, apiData })
       background: 'rgba(8,8,8,0.92)', backdropFilter: 'blur(16px)',
       position: 'sticky', top: 0, zIndex: 10, gap: 8, flexShrink: 0,
     }}>
-      {/* Left — Docket mark + tabs (tabs move to a row under the bar on mobile) */}
-      <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+      {/* Left — Docket mark + tabs (tabs move to a row under the bar on mobile and tablet) */}
+      <div style={{ display: 'flex', alignItems: 'center', flexShrink: 1, minWidth: 0 }}>
         <DocketMark accent={accent} compact={isMobile} />
-        {!isMobile && <Nav accent={accent} />}
+        {!navInRow && <Nav accent={accent} />}
       </div>
 
       {/* Center — now playing + status pills */}
