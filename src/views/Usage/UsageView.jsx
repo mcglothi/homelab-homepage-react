@@ -53,7 +53,7 @@ function UsageBody({ data }) {
             const color = w.used_pct == null ? C.dim : pctColor(w.used_pct)
             return <div key={w.quota || i} style={{ padding: '6px 0' }}>
               <Row style={{ borderBottom: 0, padding: '0 0 7px' }}>
-                <span style={{ color: C.text, flex: 1 }}>{w.quota || '—'}</span>
+                <span style={{ color: C.text, flex: 1 }}>{w.label || w.quota || '—'}</span>
                 <span style={{ color }}>{w.used_pct == null ? '—' : `${w.used_pct.toFixed(1)}%`}</span>
               </Row>
               <Bar value={w.used_pct ?? 0} max={100} color={color} />
