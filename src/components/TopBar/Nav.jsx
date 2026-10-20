@@ -1,7 +1,7 @@
 import { link, useLocation } from '../../router'
 
 // Docket's tabs. Home is the service grid; the rest are views fed from Turing.
-export const NAV = [['Home', '/'], ['AIKB', '/aikb'], ['Watch', '/watch'], ['HA', '/ha']]
+export const NAV = [['Home', '/'], ['AIKB', '/aikb'], ['AI Usage', '/usage'], ['Watch', '/watch'], ['HA', '/ha']]
 
 export function Nav({ accent, row }) {
   const { path: here } = useLocation()

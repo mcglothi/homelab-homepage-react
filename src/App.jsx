@@ -14,10 +14,11 @@ import { Nav } from './components/TopBar/Nav'
 import AikbView from './views/Aikb/AikbView'
 import WatchView from './views/Watch/WatchView'
 import HaView from './views/HomeAssistant/HaView'
+import UsageView from './views/Usage/UsageView'
 import { ViewShell } from './views/bits'
 
-const VIEWS = { '/aikb': AikbView, '/watch': WatchView, '/ha': HaView }
-const TITLES = { '/': 'Docket', '/aikb': 'AIKB · Docket', '/watch': 'Watch · Docket', '/ha': 'HA · Docket' }
+const VIEWS = { '/aikb': AikbView, '/usage': UsageView, '/watch': WatchView, '/ha': HaView }
+const TITLES = { '/': 'Docket', '/aikb': 'AIKB · Docket', '/usage': 'AI Usage · Docket', '/watch': 'Watch · Docket', '/ha': 'HA · Docket' }
 
 const ACCENT_DEFAULT = '#ff2d6b'
 const BG_DEFAULT = '#080808'

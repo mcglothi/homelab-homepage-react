@@ -101,3 +101,16 @@ export function Bar({ value, max, color }) {
     </div>
   )
 }
+
+export function DataTable({ columns, rows, empty = 'no data' }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: MONO, fontSize: 10, color: C.body, textAlign: 'right' }}>
+        <thead><tr>{columns.map((c, i) => <th key={c.key} style={{ color: C.dim, fontWeight: 400, textAlign: i === 0 ? 'left' : 'right', padding: '0 6px 7px', whiteSpace: 'nowrap' }}>{c.label}</th>)}</tr></thead>
+        <tbody>{rows.length ? rows.map((row, ri) => (
+          <tr key={row.key ?? ri}>{columns.map((c, ci) => <td key={c.key} style={{ borderTop: `1px solid ${C.line}`, padding: '7px 6px', textAlign: ci === 0 ? 'left' : 'right', whiteSpace: 'nowrap', color: ci === 0 ? C.text : C.body }}>{c.render ? c.render(row[c.key], row) : row[c.key] ?? '—'}</td>)}</tr>
+        )) : <tr><td colSpan={columns.length} style={{ color: C.dim, textAlign: 'left', padding: '8px 6px' }}>{empty}</td></tr>}</tbody>
+      </table>
+    </div>
+  )
+}
