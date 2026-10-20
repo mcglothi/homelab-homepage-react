@@ -1,14 +1,14 @@
 import { link, useLocation } from '../../router'
 
 // Docket's tabs. Home is the service grid; the rest are views fed from Turing.
-export const NAV = [['Home', '/'], ['AIKB', '/aikb'], ['Watch', '/watch'], ['HA', '/ha']]
+export const NAV = [['Home', '/'], ['AIKB', '/aikb'], ['AI Usage', '/usage'], ['Watch', '/watch'], ['HA', '/ha']]
 
 export function Nav({ accent, row }) {
   const { path: here } = useLocation()
   return (
     <nav style={row
       ? { display: 'flex', gap: 2, padding: '6px 10px', borderBottom: '1px solid #ffffff10', background: 'rgba(8,8,8,0.92)', overflowX: 'auto' }
-      : { display: 'flex', gap: 2, marginLeft: 18 }}>
+      : { display: 'flex', gap: 2, marginLeft: 18, minWidth: 0, overflowX: 'auto' }}>
       {NAV.map(([label, href]) => {
         const on = href === here
         return (

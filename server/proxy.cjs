@@ -39,6 +39,7 @@ const OPENSOAK_URL    = process.env.OPENSOAK_URL      || 'https://opensoak.home.
 // Docket tab feeds on Turing
 const WATCH_URL       = process.env.WATCH_URL        || 'http://10.10.10.50:8790'
 const AIKB_HEALTH_URL = process.env.AIKB_HEALTH_URL  || 'http://10.10.10.50:8791'
+const USAGE_URL       = process.env.USAGE_URL        || ''
 // Weather for the top bar and sidebar tile (Open-Meteo, no key)
 const WEATHER_LAT     = process.env.WEATHER_LAT      || '43.93'
 const WEATHER_LON     = process.env.WEATHER_LON      || '-69.97'
@@ -384,6 +385,10 @@ function passthrough(base, timeoutMs) {
 app.get('/api/watch/*', passthrough(WATCH_URL, 20000))
 app.post('/api/watch/*', passthrough(WATCH_URL, 20000))
 app.get('/api/aikb/*', passthrough(AIKB_HEALTH_URL, 30000))
+app.get('/api/usage/*', (req, res, next) => {
+  if (!USAGE_URL) return res.status(503).json({ error: 'USAGE_URL not configured' })
+  return passthrough(USAGE_URL, 30000)(req, res, next)
+})
 
 // ── Static files (production) ─────────────────────────────────────────────────
 const distPath = path.join(__dirname, '../dist')
