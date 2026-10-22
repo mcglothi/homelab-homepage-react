@@ -88,6 +88,11 @@ export const SERVICES = {
       href: 'https://sense.home.timmcg.net',
       details: [{ k: 'Status', v: 'online' }],
     },
+    {
+      name: 'Rakazo', desc: 'Persistent AI Bots', color: '#2563eb',
+      href: 'https://rakazo.home.timmcg.net',
+      details: [{ k: 'Host', v: 'turing' }],
+    },
   ],
   Infrastructure: [
     {
