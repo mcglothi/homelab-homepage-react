@@ -124,7 +124,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith(prefix) and self.command in methods:
                 return self._passthrough(path, base(), timeout)
         if self.command in ("GET", "HEAD"):
-            if path in ("/api/kb/note", "/api/kb/mentions") and self.command == "GET":
+            if path in ("/api/kb/note", "/api/kb/mentions", "/api/kb/context", "/api/kb/related") and self.command == "GET":
                 upstream = "/" + path.rsplit("/", 1)[1]
                 query = urlsplit(self.path).query
                 return self._passthrough(path, routes.AIKB_SEARCH_URL(), 15, upstream + ("?" + query if query else ""))
@@ -144,13 +144,19 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/themes/gallery":
                 return self._status(*appearance.gallery(q.get("refresh") == "1"))
             if path == "/api/graph":
-                return self._api(lambda: graph.build(q.get("q") or "", expand=q.get("expand") or None, live=q.get("live") == "1"))
+                return self._api(lambda: graph.build(q.get("q") or "", expand=q.get("expand") or None, live=q.get("live") == "1", lens=q.get("lens"),
+                                                         videos=q.get("videos") == "1"))
             if path.startswith("/api/"):
                 return self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return self._static(path)
         if self.command in ("POST", "DELETE") and not self._same_origin():
             return self._send_json({"error": "cross-origin request refused"}, HTTPStatus.FORBIDDEN)
         if self.command == "POST" and path in routes.POST:
+            if path == "/api/graph/explain":
+                body = self._body()
+                if body is None:
+                    return self._send_json({"error": "body is not JSON"}, HTTPStatus.BAD_REQUEST)
+                return self._status(*routes.POST[path](body))
             return self._api(routes.POST[path])
         if self.command == "POST" and path in ("/api/appearance", "/api/themes/install"):
             body = self._body()

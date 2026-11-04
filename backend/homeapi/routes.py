@@ -207,6 +207,12 @@ def media_sweep_toggle():
     return {"enabled": not flag.exists()}
 
 
+def graph_explain(body):
+    # Import here: graph already imports routes for its configuration helpers.
+    from . import graph
+    return graph.explain(body)
+
+
 # ── Health: reachability for every service card ──────────────────────────────
 # The catalog is src/services.js (ESM, shared with the front end). Python can't import
 # it, so read the literal: every card has name: '...' and href: '...'.
@@ -291,6 +297,7 @@ GET = {
 }
 POST = {
     "/api/media-sweep/toggle": media_sweep_toggle,
+    "/api/graph/explain": graph_explain,
 }
 # Prefix -> (base url fn, timeout seconds, methods). Bodies and status codes relayed as is.
 PASSTHROUGH = {

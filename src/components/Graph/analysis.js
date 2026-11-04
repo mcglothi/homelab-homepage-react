@@ -5,7 +5,7 @@
 // Kinds of node, in the order the Groups list shows them. Colors come from the theme (theme.js).
 export const KIND = {
   host: 'Hosts / VMs', pool: 'ZFS pools', dataset: 'Datasets', app: 'Apps', service: 'Dashboard cards',
-  proxy: 'Proxy names (NPM)', dns: 'DNS names', network: 'Addresses', target: 'Monitoring targets', note: 'AIKB notes', query: 'The search',
+  proxy: 'Proxy names (NPM)', dns: 'DNS names', network: 'Addresses', target: 'Monitoring targets', note: 'AIKB notes', query: 'The search', concept: 'Concepts',
 }
 
 // ── Intent ───────────────────────────────────────────────────────────────────
@@ -14,7 +14,7 @@ export const KIND = {
 // that node's facet to the front. A facet's place in the order is its weight.
 export const FACETS = { servers: 'Hosts', storage: 'Storage', apps: 'Apps', network: 'Network', monitoring: 'Monitoring', found: 'Other sources' }
 const FACET_OF = { host: 'servers', pool: 'storage', dataset: 'storage', app: 'apps', service: 'apps', proxy: 'network', dns: 'network',
-  network: 'network', target: 'monitoring', note: 'found', query: 'found' }
+  network: 'network', target: 'monitoring', note: 'found', query: 'found', concept: 'found' }
 export const facetOf = kind => FACET_OF[kind] || 'found'
 const ORDER = {
   host: ['servers', 'apps', 'storage', 'network', 'monitoring', 'found'],
@@ -302,4 +302,33 @@ export function metrics(nodes, edges, size) {
   const order = out.map((n, i) => i).sort((a, b) => out[b].val - out[a].val)
   order.forEach((i, r) => { out[i].rank = out.length > 1 ? r / out.length : 0 })
   return out
+}
+
+// Newman modularity for the community assignment metrics() just found.
+export function modularity(nodes, edges) {
+  if (!edges.length || !nodes.length) return 0
+  const byId = new Map(nodes.map(n => [n.id, n]))
+  const degree = new Map(nodes.map(n => [n.id, 0]))
+  const inside = new Map()
+  edges.forEach(e => {
+    if (!byId.has(e.a) || !byId.has(e.b)) return
+    degree.set(e.a, degree.get(e.a) + 1); degree.set(e.b, degree.get(e.b) + 1)
+    const a = byId.get(e.a), b = byId.get(e.b)
+    if (a.comm === b.comm) inside.set(a.comm, (inside.get(a.comm) || 0) + 1)
+  })
+  const totals = new Map()
+  nodes.forEach(n => totals.set(n.comm, (totals.get(n.comm) || 0) + degree.get(n.id)))
+  const m = edges.length
+  let q = 0
+  totals.forEach((total, comm) => { q += (inside.get(comm) || 0) / m - (total / (2 * m)) ** 2 })
+  return q
+}
+
+export function diversity(nodes, edges) {
+  const counts = {}
+  nodes.forEach(n => { counts[n.comm] = (counts[n.comm] || 0) + 1 })
+  const topShare = nodes.length ? Math.max(0, ...Object.values(counts)) / nodes.length : 0
+  const q = modularity(nodes, edges)
+  const label = topShare > 0.5 ? 'biased' : q < 0.3 ? 'focused' : q < 0.6 ? 'diversified' : 'dispersed'
+  return { q, topShare, label }
 }

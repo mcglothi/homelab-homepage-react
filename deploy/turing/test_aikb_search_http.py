@@ -24,8 +24,9 @@ class APITests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "notes").mkdir()
         (self.root / ".private").mkdir()
-        (self.root / "notes" / "one.md").write_text("# First note\n\nAlpha content.\n")
-        (self.root / "notes" / "two.md").write_text("# Second note\n\nBeta content.\n")
+        (self.root / "notes" / "one.md").write_text("# First note\n\nAlpha turing storage content. [Second](two.md)\n")
+        (self.root / "notes" / "two.md").write_text("# Second note\n\nBeta turing storage content.\n")
+        (self.root / "notes" / "three.md").write_text("# Third note\n\nTuring storage content.\n")
         (self.root / ".private" / "hidden.md").write_text("secret")
         (self.root / "notes" / "plain.txt").write_text("not markdown")
         (self.root / "notes" / "escape.md").symlink_to("/tmp/outside.md")
@@ -35,15 +36,21 @@ class APITests(unittest.TestCase):
         db.executescript("""CREATE TABLE chunks(id INTEGER PRIMARY KEY, file_path TEXT, section TEXT, content TEXT, tags TEXT, mtime REAL, embedding BLOB);
         CREATE TABLE entities(id INTEGER PRIMARY KEY, name TEXT UNIQUE COLLATE NOCASE, kind TEXT);
         CREATE TABLE entity_chunks(entity_id INTEGER, chunk_id INTEGER);""")
-        db.executemany("INSERT INTO chunks VALUES (?, ?, ?, '', '', ?, NULL)", [
-            (1, "notes/one.md", "overview", 100), (2, "notes/two.md", "Details", 200)])
-        db.executemany("INSERT INTO entities VALUES (?, ?, ?)", [(1, "turing", "host"), (2, "10.0.0.2", "ip"), (3, "misc", "term")])
-        db.executemany("INSERT INTO entity_chunks VALUES (?, ?)", [(1, 1), (2, 1), (1, 2), (3, 2)])
+        db.executemany("INSERT INTO chunks VALUES (?, ?, ?, ?, '', ?, NULL)", [
+            (1, "notes/one.md", "overview", "Alpha turing storage content.", 100),
+            (2, "notes/two.md", "Details", "Beta turing storage content.", 200),
+            (3, "notes/three.md", "overview", "Turing storage content.", 300)])
+        db.executemany("INSERT INTO entities VALUES (?, ?, ?)", [(1, "turing", "host"), (2, "10.0.0.2", "ip"), (3, "misc", "term"),
+                                                                     (4, "storage", "tag"), (5, "first", "file")])
+        db.executemany("INSERT INTO entity_chunks VALUES (?, ?)", [(1, 1), (2, 1), (4, 1), (5, 1),
+                                                                       (1, 2), (3, 2), (4, 2), (1, 3), (4, 3)])
         db.commit()
         db.close()
 
         def fake_search(query, top_k=5, **_):
-            return [{"file": "notes/one.md", "section": "overview", "excerpt": "Alpha", "date": "2026-01-01", "score": 1.0, "sources": ["test"]}][:top_k]
+            rows = [{"file": "notes/one.md", "section": "overview", "excerpt": "Alpha", "date": "2026-01-01", "score": 1.0, "sources": ["test"]},
+                    {"file": "notes/two.md", "section": "Details", "excerpt": "Beta", "date": "2026-01-02", "score": .9, "sources": ["test"]}]
+            return rows[:top_k]
         try:
             self.server = api.make_server(self.root, fake_search, "127.0.0.1", 0)
         except PermissionError as exc:
@@ -67,7 +74,7 @@ class APITests(unittest.TestCase):
 
     def test_healthz(self):
         status, body = self.request("/healthz")
-        self.assertEqual((status, body["chunks"], body["root"]), (200, 2, str(self.root.resolve())))
+        self.assertEqual((status, body["chunks"], body["root"]), (200, 3, str(self.root.resolve())))
 
     def test_search_shape_entities_and_k_clamp(self):
         status, body = self.request("/search?q=alpha&k=99")
@@ -95,8 +102,8 @@ class APITests(unittest.TestCase):
 
     def test_mentions_known_and_unknown(self):
         status, body = self.request("/mentions?name=turing&limit=99")
-        self.assertEqual((status, body["kind"], len(body["notes"])), (200, "host", 2))
-        self.assertEqual(body["notes"][0]["file"], "notes/two.md")
+        self.assertEqual((status, body["kind"], len(body["notes"])), (200, "host", 3))
+        self.assertEqual(body["notes"][0]["file"], "notes/three.md")
         status, body = self.request("/mentions?name=missing")
         self.assertEqual((status, body["kind"], body["notes"]), (200, None, []))
 
@@ -104,8 +111,31 @@ class APITests(unittest.TestCase):
         status, body = self.request("/links?path=notes/one.md&path=notes/two.md&path=notes/plain.txt")
         self.assertEqual(status, 200)
         self.assertEqual(sorted(body["links"]), ["notes/one.md", "notes/two.md"])
-        self.assertEqual(sorted(e["name"] for e in body["links"]["notes/one.md"]), ["10.0.0.2", "turing"])
-        self.assertEqual([e["name"] for e in body["links"]["notes/two.md"]], ["turing"])   # "misc" is a term
+        self.assertEqual(sorted(e["name"] for e in body["links"]["notes/one.md"]), ["10.0.0.2", "first", "storage", "turing"])
+        self.assertEqual(sorted(e["name"] for e in body["links"]["notes/two.md"]), ["storage", "turing"])   # "misc" is a term
+
+    def test_concepts_shape_and_terms_are_excluded(self):
+        status, body = self.request("/concepts?q=all&notes=99&limit=99")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["chunks"], 3)
+        self.assertEqual({c["name"] for c in body["concepts"]}, {"turing", "storage"})
+        self.assertTrue(all({"name", "kind", "count", "notes"} <= set(c) for c in body["concepts"]))
+        self.assertNotIn("misc", str(body))
+
+    def test_context_restricts_to_query_files(self):
+        status, body = self.request("/context?name=turing&q=alpha")
+        self.assertEqual(status, 200)
+        self.assertEqual({row["file"] for row in body["items"]}, {"notes/one.md", "notes/two.md"})
+        self.assertIn("turing", body["items"][0]["excerpt"].lower())
+
+    def test_related_links_and_path_rejection(self):
+        status, body = self.request("/related?path=notes/one.md")
+        self.assertEqual(status, 200)
+        # two and three tie on shared concepts; only two is linked from one.md
+        self.assertEqual({r["file"]: r["linked"] for r in body["items"]}, {"notes/two.md": True, "notes/three.md": False})
+        status, body = self.request("/related?path=../notes/one.md")
+        self.assertEqual(status, 400)
+        self.assertIn("error", body)
 
     def test_not_found_and_method(self):
         self.assertEqual(self.request("/nope")[0], 404)

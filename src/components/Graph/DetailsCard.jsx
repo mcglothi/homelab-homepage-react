@@ -61,7 +61,7 @@ const KEY = 'docket.graph.details.v1'
 const loadOpen = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { return {} } }
 const FACTS = ['Playbook', 'Inventory', 'Project', 'Last success', 'Title', 'Login', 'Type', 'OS (CMDB)', 'Environment', 'App tier', 'Status', 'Power (Prism)', 'Hosts named for them', 'Role / team AD groups', 'Comment', 'Building']
 
-export default function DetailsCard({ node, model, raw, rawById, byId, select, theme, info, picked, onCompare, pinned, onUnpin, onReveal, isoId, onIsolate, onSearch, onCenter, focus, onHoverNode }) {
+export default function DetailsCard({ node, model, raw, rawById, byId, select, theme, info, picked, onCompare, pinned, onUnpin, onReveal, isoId, onIsolate, onSearch, onCenter, focus, search, onHoverNode }) {
   const [openMap, setOpenMap] = useState(loadOpen)
   const [attrsOpen, setAttrsOpen] = useState(false)
   const [sigOpen, setSigOpen] = useState(false)
@@ -174,6 +174,8 @@ export default function DetailsCard({ node, model, raw, rawById, byId, select, t
         </div>
       )}
 
+      {node.kind === 'concept' && <ConceptContext name={node.label} search={search} />}
+
       {sections.map(s => {
         const open = isOpen(s.id)
         const q = (find[s.id] || '').toLowerCase()
@@ -213,6 +215,27 @@ function Collapse({ open, children }) {
       <div style={{ overflow: 'hidden', minHeight: 0 }}>{ever ? children : null}</div>
     </div>
   )
+}
+
+function ConceptContext({ name, search }) {
+  const [state, setState] = useState({ loading: true, items: [] })
+  useEffect(() => {
+    let live = true
+    setState({ loading: true, items: [] })
+    fetch(`/api/kb/context?name=${encodeURIComponent(name)}&q=${encodeURIComponent(search || '')}`).then(async r => {
+      const body = await r.json().catch(() => ({})); if (!r.ok) throw new Error(body.error || `${r.status}`); return body
+    }).then(body => live && setState({ loading: false, items: body.items || [] })).catch(e => live && setState({ loading: false, items: [], error: e.message }))
+    return () => { live = false }
+  }, [name, search])
+  return <div style={{ minHeight: 82, marginTop: 10, borderTop: `1px solid ${C.line}`, paddingTop: 6 }}>
+    <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 1, textTransform: 'uppercase', color: C.muted }}>Where it's mentioned</div>
+    {state.loading && <div style={{ fontSize: 11, color: C.dim, marginTop: 5 }}>Loading notes…</div>}
+    {state.error && <div style={{ fontSize: 11, color: C.red, marginTop: 5 }}>{state.error}</div>}
+    {!state.loading && !state.error && state.items.map(item => <div key={item.file + item.section} style={{ marginTop: 7, fontSize: 11.5 }}>
+      <a onClick={link(`/aikb/note?path=${encodeURIComponent(item.file)}&section=${encodeURIComponent(item.section)}`)} style={{ color: C.accent, cursor: 'pointer' }}>{item.title} <span style={{ color: C.dim }}>· {item.section}</span></a>
+      <div style={{ color: C.muted, marginTop: 2, lineHeight: 1.35 }}>{item.excerpt}</div>
+    </div>)}
+  </div>
 }
 
 function Row({ r, select, onReveal, theme, onHoverNode }) {
