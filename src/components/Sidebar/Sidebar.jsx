@@ -7,15 +7,21 @@ import { NetworkStats } from './NetworkStats'
 import { QuickLinks } from './QuickLinks'
 import { NeedsAttention } from './NeedsAttention'
 import { C, alpha } from '../../ui/theme'
+import { SectionsProvider, SectionsBar } from './Section'
+
+// Section ids, as each widget names itself (StatTiles has no title, so it always shows)
+const SECTIONS = ['Needs Attention', 'Releases', 'Grafana', 'Power', 'AdGuard', 'Network', 'Quick Links']
 
 export function Sidebar({ accent, apiData }) {
   return (
+    <SectionsProvider ids={SECTIONS}>
     <div style={{
       width: 320, borderLeft: `1px solid ${alpha(C.text, '10')}`,
       padding: '24px 20px', overflowY: 'auto',
       display: 'flex', flexDirection: 'column', gap: 16,
       background: alpha(C.text, 0.01), flexShrink: 0,
     }}>
+      <SectionsBar />
       <NeedsAttention accent={accent} />
       <StatTiles adguard={apiData?.adguard} weather={apiData?.weather} />
       <CalendarWidget accent={accent} events={apiData?.calendarEvents} />
@@ -25,5 +31,6 @@ export function Sidebar({ accent, apiData }) {
       <NetworkStats accent={accent} data={apiData?.network} />
       <QuickLinks accent={accent} />
     </div>
+    </SectionsProvider>
   )
 }

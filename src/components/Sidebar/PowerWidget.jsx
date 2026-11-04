@@ -1,5 +1,7 @@
 import { C, alpha } from '../../ui/theme'
+import { SectionHeader, useCollapsed } from './Section'
 export function PowerWidget({ accent, data }) {
+  const collapsed = useCollapsed('Power')
   // Real data only: /api/power (Senseless live draw + Prometheus history). No placeholder values.
   const powerHistory = data?.history ?? []
   const currentW = data?.current ?? null
@@ -21,13 +23,13 @@ export function PowerWidget({ accent, data }) {
 
   return (
     <div style={{ background: alpha(C.text, 0.03), border: `1px solid ${alpha(C.text, '10')}`, borderRadius: 12, padding: '14px 16px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: C.amber, letterSpacing: 3, textTransform: 'uppercase' }}>Power</div>
+      <SectionHeader id="Power" accent={C.amber} title="Power">
         <a href="https://sense.home.timmcg.net" target="_blank" rel="noreferrer"
           style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: live ? alpha(C.green, '90') : C.accent, textDecoration: 'none' }}>
           {live ? 'Sense · live' : 'Sense · stale'}
         </a>
-      </div>
+      </SectionHeader>
+      {!collapsed && (<>
 
       {/* Gauge + reading */}
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, marginBottom: 14 }}>
@@ -95,6 +97,7 @@ export function PowerWidget({ accent, data }) {
           </div>
         ))}
       </div>
+      </>)}
     </div>
   )
 }

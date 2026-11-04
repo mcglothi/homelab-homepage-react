@@ -6,6 +6,7 @@ import { TopBarPill } from '../shared/TopBarPill'
 import { DocketMark } from './DocketMark'
 import { Nav } from './Nav'
 import { C, alpha } from '../../ui/theme'
+import { AuthPill } from './AuthPill'
 
 export function TopBar({ accent, isMobile, isTablet, navInRow, onSidebarToggle, apiData }) {
   const { hh, mm, ss, ampm, dateStr } = useClock()
@@ -41,7 +42,8 @@ export function TopBar({ accent, isMobile, isTablet, navInRow, onSidebarToggle, 
       {/* Right — status + clock */}
       <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 20, flexShrink: 0 }}>
         {!isMobile && (
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <AuthPill />
             <TopBarPill color={alpha(C.green, '30')} textColor={C.green}>
               dns {apiData?.adguard?.blocked != null ? `${apiData.adguard.blocked}%` : '—'}
             </TopBarPill>

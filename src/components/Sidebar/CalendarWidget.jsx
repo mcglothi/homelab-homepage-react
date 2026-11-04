@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { dateKey, dateFromKey, weekKeys, toggleDate } from './calendarDates'
 import './CalendarWidget.css'
+import { SectionHeader, useCollapsed } from './Section'
 
 const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const shortDate = key => dateFromKey(key).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
 export function CalendarWidget({ accent, events: eventsData }) {
+  const collapsed = useCollapsed('Releases')
   const now = new Date()
   const today = dateKey(now)
   const [offset, setOffset] = useState(0)
@@ -26,10 +28,10 @@ export function CalendarWidget({ accent, events: eventsData }) {
 
   return (
     <section className="release-calendar" style={{ '--calendar-accent': accent }} aria-label="Media release calendar">
-      <div className="calendar-title-row">
-        <h2>Releases</h2>
+      <SectionHeader id="Releases" accent={accent} title="Releases">
         <button className={`calendar-week-button ${!selected.length && offset === 0 ? 'is-active' : ''}`} onClick={resetWeek}>This week</button>
-      </div>
+      </SectionHeader>
+      {!collapsed && (<>
       <div className="calendar-month-row">
         <button className="calendar-nav" aria-label="Previous month" disabled={offset === -1} onClick={() => setOffset(o => o - 1)}>‹</button>
         <h3>{viewing.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
@@ -93,6 +95,7 @@ export function CalendarWidget({ accent, events: eventsData }) {
           </div>
         )}
       </div>
+      </>)}
     </section>
   )
 }

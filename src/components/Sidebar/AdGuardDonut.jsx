@@ -1,7 +1,9 @@
 import { useCountUp } from '../../hooks/useCountUp'
 import { C, alpha } from '../../ui/theme'
+import { SectionHeader, useCollapsed } from './Section'
 
 export function AdGuardDonut({ data }) {
+  const collapsed = useCollapsed('AdGuard')
   const blocked = data?.percentage ?? 89.2
   const queries = data?.queries ?? 12441
 
@@ -12,9 +14,8 @@ export function AdGuardDonut({ data }) {
 
   return (
     <div style={{ background: alpha(C.text, 0.03), border: `1px solid ${alpha(C.text, '10')}`, borderRadius: 12, padding: '14px 16px' }}>
-      <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: '#f60d1a', letterSpacing: 3, marginBottom: 12, textTransform: 'uppercase' }}>
-        AdGuard
-      </div>
+      <SectionHeader id="AdGuard" accent={'#f60d1a'} title="AdGuard" />
+      {!collapsed && (<>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <div style={{ position: 'relative', width: 70, height: 70, flexShrink: 0 }}>
           <svg width="70" height="70" style={{ transform: 'rotate(-90deg)' }}>
@@ -43,6 +44,7 @@ export function AdGuardDonut({ data }) {
           ))}
         </div>
       </div>
+      </>)}
     </div>
   )
 }

@@ -6,7 +6,10 @@ export function AnimatedValue({ raw, color, size = 12 }) {
   const match = m && !/^[.\w-]/.test(m[2]) ? m : null
   // The hook must run on every render: values flip between "—" and numbers as data arrives
   const counted = useCountUp(match ? parseFloat(match[1].replace(/,/g, '')) : NaN, 1000)
-  const style = { fontFamily: "'JetBrains Mono',monospace", fontSize: size, color, fontWeight: 600 }
+  // Long values (schedules, model names) wrap to two lines rather than being cut off
+  const style = { fontFamily: "'JetBrains Mono',monospace", fontSize: size, color, fontWeight: 600, lineHeight: 1.3,
+                  display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden',
+                  overflowWrap: 'anywhere' }
   if (!match) return <span style={style}>{raw}</span>
   const [, num, suffix] = match
   const display = num.includes(',') ? Number(counted).toLocaleString() : counted

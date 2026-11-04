@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { C, alpha } from '../../ui/theme'
+import { SectionHeader, useCollapsed } from './Section'
 
 const LINKS = [
   { label: 'timmcg.net', href: 'https://timmcg.net' },
@@ -8,12 +9,12 @@ const LINKS = [
 ]
 
 export function QuickLinks({ accent }) {
+  const collapsed = useCollapsed('Quick Links')
   const [hovered, setHovered] = useState(null)
   return (
     <div>
-      <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: accent, letterSpacing: 3, marginBottom: 10, textTransform: 'uppercase' }}>
-        Quick Links
-      </div>
+      <SectionHeader id="Quick Links" accent={accent} title="Quick Links" />
+      {!collapsed && (<>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {LINKS.map(l => (
           <a
@@ -36,6 +37,7 @@ export function QuickLinks({ accent }) {
           </a>
         ))}
       </div>
+      </>)}
     </div>
   )
 }
