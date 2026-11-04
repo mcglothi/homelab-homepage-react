@@ -35,5 +35,7 @@ def _names(v):
         try:
             v = json.loads(v)
         except ValueError:
-            v = [v]
+            pass
+    if isinstance(v, str):
+        v = [v]
     return [n for n in (v if isinstance(v, list) else []) if isinstance(n, str) and n]

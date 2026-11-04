@@ -50,7 +50,8 @@ _state = Cached(60, _ops_state)
 def _days_left(expires):
     try:
         stamp = str(expires).replace("Z", "+00:00")
-        when = datetime.fromisoformat(stamp).replace(tzinfo=timezone.utc) if "T" not in stamp else datetime.fromisoformat(stamp)
+        when = datetime.fromisoformat(stamp)
+        when = when.replace(tzinfo=timezone.utc) if when.tzinfo is None else when  # naive stamps are UTC
         return int((when - datetime.now(timezone.utc)).total_seconds() // 86400)
     except (TypeError, ValueError):
         return None
@@ -71,6 +72,7 @@ def _cert_groups(F):
         # cert_id is NPM's certificate id (npm_id is the proxy's); older mirror rows lack it
         key = str(proxy["cert_id"]) if proxy.get("cert_id") else "%s|%s" % (expires or "", _cert_parent(proxy["name"]))
         cert = groups.setdefault(key, {"key": key, "npm_id": proxy.get("cert_id"), "expires": expires, "names": set(), "label": proxy.get("cert_name")})
+        cert["expires"], cert["label"] = cert["expires"] or expires, cert["label"] or proxy.get("cert_name")
         cert["names"].add(proxy["name"])
         cert["names"].update(proxy.get("aliases") or [])
     return groups
@@ -82,15 +84,26 @@ def certificates(F, state):
     for s in state.get("ssl_certs") or []:
         if not isinstance(s, dict):
             continue
-        sid, name = s.get("npm_cert_id"), s.get("name") or "Certificate"
+        sid, name = s.get("npm_cert_id"), str(s.get("name") or "")
+        if sid is None and not name:
+            continue
         cert = next((c for c in certs.values() if sid is not None and str(c.get("npm_id")) == str(sid)), None)
-        cert = cert or next((c for c in certs.values() if name.lower() in {n.lower() for n in c["names"] | {c.get("label") or ""}}), None)
+        # a stale id in the state file still merges when the name matches
+        cert = cert or next((c for c in certs.values() if name and name.lower() in {n.lower() for n in c["names"] | {c.get("label") or ""}}), None)
         key = cert["key"] if cert else (str(sid) if sid is not None else name.lower())
-        cert = certs.setdefault(key, {"key": key, "npm_id": sid, "expires": s.get("expires"), "names": set()})
-        cert["names"].add(name)
+        cert = certs.setdefault(key, {"key": key, "npm_id": sid, "expires": s.get("expires"), "names": set(), "label": name or None})
+        if name and name != cert.get("label"):
+            cert["names"].add(name)
         cert["expires"] = cert.get("expires") or s.get("expires")
         cert["warn_after"], cert["file"] = s.get("warn_after"), s.get("file")
     return certs
+
+
+def _warn_days(warn_after):
+    try:
+        return int(warn_after)
+    except (TypeError, ValueError):
+        return 21
 
 
 def _ops_item_id(prefix, item):
@@ -209,13 +222,16 @@ def _all(F, live=False):
     for alert in alerts:
         labels, annotations = alert.get("labels") or {}, alert.get("annotations") or {}
         name, instance = labels.get("alertname") or "Alert", labels.get("instance") or ""
-        aid = node("al:%s|%s" % (name, instance), "alert", name,
-                   " · ".join(filter(None, [labels.get("severity"), alert.get("state"), "since " + (alert.get("activeAt") or "")[:16]])),
+        # alertname+instance isn't unique (DiskFull per mountpoint, host-only alerts)
+        where = "|".join(filter(None, [instance or labels.get("host")] + [labels.get(k) for k in ("mountpoint", "device", "name")]))
+        since = (alert.get("activeAt") or "")[:16]
+        aid = node("al:%s|%s" % (name, where), "alert", name,
+                   " · ".join(filter(None, [labels.get("severity"), alert.get("state"), "since " + since if since else None])),
                    [["Summary", annotations.get("summary") or "—"], ["Description", annotations.get("description") or "—"],
                     ["Instance", instance or "—"], ["Job", labels.get("job") or "—"], ["Source", "Prometheus"]],
                    missing=alert.get("state") == "firing")
-        hostpart = urlsplit("//" + instance).hostname or instance.split(":", 1)[0]
-        host = labels.get("host")
+        hostpart = urlsplit(instance if "://" in instance else "//" + instance).hostname or instance.split(":", 1)[0]
+        host = (labels.get("host") or "").rsplit(":", 1)[0] if (labels.get("host") or "").count(":") == 1 else labels.get("host")
         hk = (F["ip_of"].get(host) or (fleet.short(host) if fleet.short(host) in F["hosts"] else None)) if host else None
         hk = hk or F["ip_of"].get(hostpart) or (fleet.short(hostpart) if fleet.short(hostpart) in F["hosts"] else None)
         if hk:
@@ -232,13 +248,13 @@ def _all(F, live=False):
             attrs.append(["Open", "/aikb/note?path=" + quote(str(cert["file"]), safe="")])
         cid = node("cert:" + cert["key"], "cert", cert.get("label") or (names[0] if names else "Certificate"),
                    "expires in %s days" % days if days is not None else "expiry unknown", attrs,
-                   missing=days is not None and days < 21)
+                   missing=days is not None and days < _warn_days(cert.get("warn_after")))
         for name in names:
             edge(cid, "px:" + name, "covers", "covers", via="NPM")
     for prefix, kind, values in (("inc", "incident", state.get("open_incidents") or []), ("todo", "pending", state.get("pending") or [])):
         for raw in values:
             item = _item_fields(raw)
-            iid = node(_ops_item_id(prefix, item["item"]), kind, item["item"][:60],
+            iid = node(_ops_item_id(prefix, item["item"] + "\n" + str(item["detail"] or "")), kind, item["item"][:60],
                        " · ".join(filter(None, [str(item["priority"]) if item["priority"] else None, str(item["project"]) if item["project"] else None])),
                        [["Detail", item["detail"] or "—"], ["Blocked by", item["blocked_by"] or "—"]]
                        + ([["Open", "/aikb/note?path=" + quote(str(item["file"]), safe="")]] if item["file"] else []))
@@ -495,7 +511,8 @@ def build(q, expand=None, live=False, lens=None, videos=False):
         if everything:
             seeds = list(nodes)
         elif scope == "ops":
-            seeds = [i for i, n in nodes.items() if n["kind"] in ("alert", "cert", "incident", "pending")]
+            ops = {i: n for i, n in nodes.items() if n["kind"] in ("alert", "cert", "incident", "pending")}
+            seeds = _seeds(text, ops) if text else list(ops)
         else:
             seeds = [] if notes_only else _seeds(text, nodes)
         keep = set(nodes) if everything else _around(seeds, edges, DEPTH)

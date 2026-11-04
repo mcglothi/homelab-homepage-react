@@ -40,6 +40,7 @@ ssl_certs:
 open_incidents:
   - item: Disk full
     detail: turing needs attention
+    since: 2026-11-01
 pending:
   - item: Review certificate
     detail: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -48,6 +49,8 @@ pending:
     project: lab
     file: .private/hidden.md
 """)
+        with (self.root / "_state.yaml").open("a") as state:  # symlinked and absolute note paths must not pass
+            state.write("  - item: Symlink\n    file: notes/escape.md\n  - item: Absolute\n    file: %s\n" % (self.root / "notes" / "one.md"))
         tool = self.root / "_tools" / "aikb-search"
         tool.mkdir(parents=True)
         db = sqlite3.connect(tool / "aikb_index.db")
@@ -101,6 +104,8 @@ pending:
         self.assertEqual(body["ssl_certs"][0]["file"], "notes/one.md")
         self.assertEqual(body["pending"][0]["file"], None)
         self.assertEqual(len(body["pending"][0]["detail"]), 400)
+        self.assertEqual(body["open_incidents"][0]["since"], "2026-11-01")   # a YAML date, still JSON
+        self.assertEqual([p["file"] for p in body["pending"][1:]], [None, None])
 
     def test_search_shape_entities_and_k_clamp(self):
         status, body = self.request("/search?q=alpha&k=99")

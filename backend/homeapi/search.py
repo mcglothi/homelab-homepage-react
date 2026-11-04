@@ -132,7 +132,8 @@ _ops_state_cache = Cached(60, _aikb_state)
 def _ops_days(expires):
     try:
         stamp = str(expires).replace("Z", "+00:00")
-        when = datetime.fromisoformat(stamp).replace(tzinfo=timezone.utc) if "T" not in stamp else datetime.fromisoformat(stamp)
+        when = datetime.fromisoformat(stamp)
+        when = when.replace(tzinfo=timezone.utc) if when.tzinfo is None else when
         return int((when - datetime.now(timezone.utc)).total_seconds() // 86400)
     except (TypeError, ValueError):
         return None
@@ -169,13 +170,13 @@ def _ops(q):
         level = 0 if severity.lower() in ("critical", "page", "fatal") else 1
         host = labels.get("host") or labels.get("instance") or labels.get("job")
         rows.append((level, {"title": labels.get("alertname") or "Alert",
-                             "subtitle": " · ".join(filter(None, [severity, host, "since " + (alert.get("activeAt") or "")[:16]])),
+                             "subtitle": " · ".join(filter(None, [severity, host, ("since " + alert["activeAt"][:16]) if alert.get("activeAt") else None])),
                              "detail": annotations.get("summary") or annotations.get("description"), "status": "failed" if level == 0 else "open"}))
     from . import graph  # graph imports search, so keep this local
     certs = graph.certificates(F, state)
     for cert in certs.values():
         names, days = sorted(cert["names"]), _ops_days(cert["expires"])
-        if days is None or days >= 30 or not _ops_match(q, *names, cert["expires"]):
+        if days is None or days >= 30 or not _ops_match(q, *names, cert.get("label"), cert["expires"]):
             continue
         level = 0 if days < 7 else 1
         rows.append((level, {"title": cert.get("label") or names[0], "subtitle": "certificate · %s days left" % days,
@@ -183,11 +184,12 @@ def _ops(q):
     for kind, values in (("incident", state.get("open_incidents") or []), ("pending", state.get("pending") or [])):
         for raw in values:
             item = _ops_item(raw)
-            if not _ops_match(q, item["item"], item["detail"], item["project"], item["blocked_by"]):
+            if not _ops_match(q, item["item"], item["detail"], item["project"], item["blocked_by"], item["priority"]):
                 continue
             priority = str(item["priority"] or kind)
-            level = 0 if priority.lower() in ("critical", "p0", "high") else 1 if priority.lower() in ("warning", "p1", "medium") else 2
-            level += kind == "pending"  # a to-do, however high, ranks below live trouble
+            urgent = priority.lower() in ("critical", "p0", "high")
+            # an open incident is live trouble; a to-do, however high, ranks below it
+            level = (0 if urgent else 1) if kind == "incident" else (1 if urgent else 2 if priority.lower() in ("warning", "p1", "medium") else 3)
             rows.append((level, {"title": item["item"], "subtitle": " · ".join(filter(None, [priority, item["project"]])),
                                 "detail": item["detail"], "status": "failed" if level == 0 else "open",
                                 **({"href": "/aikb/note?path=" + js_quote(item["file"]), "internal": True} if item["file"] else {})}))

@@ -76,6 +76,38 @@ class OpsGraphTest(unittest.TestCase):
         nodes, _ = graph._all(self.F, live=True)
         self.assertEqual(graph._seeds("certificates", nodes), [n["id"] for n in nodes.values() if n["kind"] == "cert"])
 
+    def test_review_fixes(self):  # agy review of the ops branch
+        from datetime import datetime, timedelta, timezone
+        soon = (datetime.now(timezone.utc) + timedelta(days=25)).replace(tzinfo=None).isoformat()
+        self.assertIn(graph._days_left(soon), (24, 25))                      # naive ISO stamp is UTC, not None
+        F = dict(self.F, proxies={})
+        alerts = [{"labels": {"alertname": "DiskFull", "host": "turing", "mountpoint": "/"}, "state": "firing"},
+                  {"labels": {"alertname": "DiskFull", "host": "nas", "mountpoint": "/"}, "state": "pending"},
+                  {"labels": {"alertname": "ProbeFailed", "instance": "https://10.0.0.50:8443/health"}, "state": "firing"}]
+        state = {"ssl_certs": [{"name": "turing.home.timmcg.net", "expires": soon, "warn_after": 30}, {"npm_cert_id": 9}],
+                 "open_incidents": [{"description": "A"}, {"description": "B"}]}
+        graph._alerts, graph._state = Cached(60, lambda: alerts), Cached(60, lambda: state)
+        nodes, edges = graph._all(F)
+        al = {i for i, n in nodes.items() if n["kind"] == "alert"}
+        self.assertEqual(len(al), 3)                                            # no alertname+instance collision
+        self.assertIn(("h:turing", "alerts"), {(e["a"], e["kind"]) for e in edges if e["b"].startswith("al:ProbeFailed")})
+        certs = {n["label"]: n for n in nodes.values() if n["kind"] == "cert"}
+        self.assertTrue(certs["turing.home.timmcg.net"]["missing"])            # 25 days < warn_after 30
+        self.assertNotIn("Certificate", " ".join(dict(c["attrs"])["Names covered"] for c in certs.values()))
+        self.assertEqual(sum(1 for n in nodes.values() if n["kind"] == "incident"), 2)
+        self.assertFalse(any(n["sub"].endswith("since ") for n in nodes.values()))
+        from homeapi.sources import npm
+        self.assertEqual(npm._names('"solo.home.timmcg.net"'), ["solo.home.timmcg.net"])
+
+    def test_scoped_ops_query_filters_by_text(self):
+        get, aikb = graph.fleet.get, graph._aikb
+        graph.fleet.get, graph._aikb = (lambda: self.F), (lambda *a, **k: None)  # never the live facade
+        try:
+            self.assertEqual(graph.build("ops: nonexistent_term")["seeds"], [])
+            self.assertTrue(graph.build("ops:")["seeds"])
+        finally:
+            graph.fleet.get, graph._aikb = get, aikb
+
 
 class OpsSearchTest(unittest.TestCase):
     def setUp(self):
@@ -102,6 +134,14 @@ class OpsSearchTest(unittest.TestCase):
         self.assertEqual(data["scope"], "ops")
         self.assertEqual(data["groups"][0]["source"], "ops")
         self.assertEqual(search.parse_scope("alerts: disk"), ("ops", "disk"))
+
+    def test_incident_outranks_high_todo_and_priority_matches(self):
+        search.fetch_local = lambda url, **_: {"data": {"alerts": []}} if "/alerts" in url else {
+            "open_incidents": [{"item": "Database down"}], "pending": [{"item": "Clean up logs", "priority": "high"}]}
+        search._ops_alert_cache, search._ops_state_cache = Cached(60, search._prom_alerts), Cached(60, search._aikb_state)
+        titles = [i["title"] for i in search._ops("")["items"]]
+        self.assertLess(titles.index("Database down"), titles.index("Clean up logs"))
+        self.assertEqual([i["title"] for i in search._ops("high")["items"]], ["Clean up logs"])
 
 
 if __name__ == "__main__":
