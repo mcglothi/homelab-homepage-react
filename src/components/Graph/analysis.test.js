@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { capGroups, rankGroup, recScore, decay, foldSummary, agoText, isDated, diversity, modularity, surprising, suggestions } from './analysis.js'
+import { initialOrder, capGroups, rankGroup, recScore, decay, foldSummary, agoText, isDated, diversity, modularity, surprising, suggestions } from './analysis.js'
 
 const NOW = Date.parse('2026-11-04T12:00:00Z')
 const DAY = 86400000
@@ -146,4 +146,9 @@ test('fold placeholders never show up as surprising ties or suggestions', () => 
   const edges = [{ a: 'h', b: 'more:x', label: 'folded' }, { a: 'p', b: 'q', label: 'mentions' }]
   assert.deepEqual(surprising(nodes, edges).map(x => x.label), ['mentions'])
   assert.ok(!suggestions({ nodes }, 'babbage').some(s => s.includes('more')))
+})
+
+test('media seeds order the Media facet first; Prometheus targets stay fleet', () => {
+  for (const id of ['yt:a1', 'ch:nodus labs', 'tt:50', 'u:1']) assert.equal(initialOrder(id)[0], 'media', id)
+  assert.notEqual(initialOrder('t:node|10.0.0.2:9100')[0], 'media')
 })

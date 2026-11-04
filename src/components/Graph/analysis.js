@@ -27,7 +27,7 @@ const ORDER = {
 export const WEIGHTS = [1, 0.85, 0.65, 0.5, 0.4, 0.3, 0.22, 0.16]
 export const initialOrder = seedId => {
   const p = (seedId || '').split(':')[0]
-  const kind = { h: 'host', a: 'app', svc: 'app', pl: 'storage', ds: 'storage', px: 'network', d: 'network', ip: 'network', t: 'media', u: 'media', dev: 'media', al: 'ops', cert: 'ops', inc: 'ops', todo: 'ops' }[p] || 'host'
+  const kind = { h: 'host', a: 'app', svc: 'app', pl: 'storage', ds: 'storage', px: 'network', d: 'network', ip: 'network', t: 'host', tt: 'media', u: 'media', dev: 'media', yt: 'media', ch: 'media', al: 'ops', cert: 'ops', inc: 'ops', todo: 'ops' }[p] || 'host'
   return ORDER[kind].slice()
 }
 // weight of a kind: its facet's place in the order; muted facets collapse
