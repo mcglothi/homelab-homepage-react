@@ -1,7 +1,9 @@
 import { TopBarPill } from '../shared/TopBarPill'
 
 export function OverseerrBadge({ data }) {
-  const count = data?.pending ?? 3
+  // Hidden with nothing pending (and while loading: it used to show a made-up 3)
+  const count = data?.pending ?? 0
+  if (!count) return null
   return (
     <TopBarPill color="#e5700d40" textColor="#e5700d">
       <span style={{

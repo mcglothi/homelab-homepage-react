@@ -2,7 +2,6 @@ import { useClock } from './LiveClock'
 import { PlexNowPlaying } from './PlexNowPlaying'
 import { DownloadTicker } from './DownloadTicker'
 import { OverseerrBadge } from './OverseerrBadge'
-import { TopBarPill } from '../shared/TopBarPill'
 import { DocketMark } from './DocketMark'
 import { Nav } from './Nav'
 import { C, alpha } from '../../ui/theme'
@@ -27,15 +26,10 @@ export function TopBar({ accent, isMobile, isTablet, navInRow, onSidebarToggle, 
 
       {/* Center — now playing + status pills */}
       {!isMobile && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden', flex: 1, justifyContent: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden', flex: 1, minWidth: 0, justifyContent: 'center' }}>
           <PlexNowPlaying data={apiData?.plex} />
           {!isTablet && <DownloadTicker data={apiData?.sabnzbd} />}
           {!isTablet && <OverseerrBadge data={apiData?.overseerr} />}
-          {/* Tailnet control server reachability (peer count would need a headscale API key) */}
-          <TopBarPill color="#246bfd40" textColor="#246bfd" glow>
-            <span style={{ fontSize: 9, color: apiData?.headscale?.online === true ? C.green : apiData?.headscale?.online === false ? C.red : C.dim }}>●</span>
-            headscale
-          </TopBarPill>
         </div>
       )}
 
@@ -43,15 +37,8 @@ export function TopBar({ accent, isMobile, isTablet, navInRow, onSidebarToggle, 
       <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 20, flexShrink: 0 }}>
         {!isMobile && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/* Headscale's tailnet status lives in here too */}
             <AuthPill />
-            <TopBarPill color={alpha(C.green, '30')} textColor={C.green}>
-              dns {apiData?.adguard?.blocked != null ? `${apiData.adguard.blocked}%` : '—'}
-            </TopBarPill>
-            {!isTablet && (
-              <TopBarPill>
-                {apiData?.weather?.temp != null ? `${apiData.weather.temp}°F` : '—'} · Topsham ME
-              </TopBarPill>
-            )}
           </div>
         )}
         {!isMobile && (
