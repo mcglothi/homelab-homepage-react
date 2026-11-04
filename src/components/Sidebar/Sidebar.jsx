@@ -6,14 +6,15 @@ import { AdGuardDonut } from './AdGuardDonut'
 import { NetworkStats } from './NetworkStats'
 import { QuickLinks } from './QuickLinks'
 import { NeedsAttention } from './NeedsAttention'
+import { C, alpha } from '../../ui/theme'
 
 export function Sidebar({ accent, apiData }) {
   return (
     <div style={{
-      width: 320, borderLeft: '1px solid #ffffff10',
+      width: 320, borderLeft: `1px solid ${alpha(C.text, '10')}`,
       padding: '24px 20px', overflowY: 'auto',
       display: 'flex', flexDirection: 'column', gap: 16,
-      background: 'rgba(255,255,255,0.01)', flexShrink: 0,
+      background: alpha(C.text, 0.01), flexShrink: 0,
     }}>
       <NeedsAttention accent={accent} />
       <StatTiles adguard={apiData?.adguard} weather={apiData?.weather} />

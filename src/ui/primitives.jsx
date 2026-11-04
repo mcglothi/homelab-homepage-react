@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { C, MONO, useTheme } from './theme'
+import { C, MONO, useTheme, alpha, glow } from './theme'
 
 // Console-look building blocks shared by every view. Keep them dumb: layout and
 // colour only, no data fetching.
@@ -11,7 +11,7 @@ export function SectionTitle({ children, right, style }) {
       <span style={{ fontFamily: MONO, fontSize: 10, color: accent, letterSpacing: 3, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
         {children}
       </span>
-      <span style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${accent}40, transparent)` }} />
+      <span style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${alpha(accent, '40')}, transparent)` }} />
       {right}
     </div>
   )
@@ -22,9 +22,9 @@ export function Panel({ children, color, active, style, ...rest }) {
   const c = color || accent
   return (
     <div {...rest} style={{
-      background: active ? `linear-gradient(${c}14, ${c}14), ${C.panel}` : C.panel,
-      border: `1px solid ${active ? c + '70' : c + '30'}`,
-      borderRadius: cardRadius, boxShadow: active ? `0 0 18px ${c}22` : 'none',
+      background: active ? `linear-gradient(${alpha(c, '14')}, ${alpha(c, '14')}), ${C.panel}` : C.panel,
+      border: `1px solid ${active ? alpha(c, '70') : alpha(c, '30')}`,
+      borderRadius: cardRadius, boxShadow: active ? `0 0 18px ${glow(c, '22')}` : 'none',
       transition: 'border-color .15s, box-shadow .15s, background .15s', ...style,
     }}>{children}</div>
   )
@@ -43,9 +43,9 @@ export function Button({ children, variant = 'default', size = 'md', color, styl
   }
   const looks = {
     default: { background: hover ? C.panel2 : 'transparent', border: `1px solid ${hover ? C.line2 : C.line}`, color: C.body },
-    primary: { background: hover ? `${c}30` : `${c}1c`, border: `1px solid ${c}80`, color: c, boxShadow: hover ? `0 0 12px ${c}40` : 'none' },
+    primary: { background: hover ? `${alpha(c, '30')}` : `${alpha(c, '1c')}`, border: `1px solid ${alpha(c, '80')}`, color: c, boxShadow: hover ? `0 0 12px ${glow(c, '40')}` : 'none' },
     ghost: { background: hover ? C.panel2 : 'transparent', border: '1px solid transparent', color: hover ? C.text : C.muted },
-    danger: { background: hover ? `${C.red}1c` : 'transparent', border: `1px solid ${C.red}55`, color: C.red },
+    danger: { background: hover ? `${alpha(C.red, '1c')}` : 'transparent', border: `1px solid ${alpha(C.red, '55')}`, color: C.red },
   }
   return (
     <button {...rest} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
@@ -57,7 +57,7 @@ export function Pill({ children, color = C.muted, solid, title, style, onClick }
   return (
     <span title={title} onClick={onClick} style={{
       fontFamily: MONO, fontSize: 10, color, padding: '2px 8px', borderRadius: 20,
-      border: `1px solid ${color}55`, background: solid ? `${color}18` : 'transparent',
+      border: `1px solid ${alpha(color, '55')}`, background: solid ? `${alpha(color, '18')}` : 'transparent',
       display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
       cursor: onClick ? 'pointer' : 'default', ...style,
     }}>{children}</span>
@@ -66,7 +66,7 @@ export function Pill({ children, color = C.muted, solid, title, style, onClick }
 
 export function Dot({ color, pulse, size = 7, title }) {
   return <span title={title} style={{ width: size, height: size, borderRadius: '50%', background: color, flexShrink: 0,
-    boxShadow: pulse ? `0 0 8px ${color}` : 'none', display: 'inline-block' }} />
+    boxShadow: pulse ? `0 0 8px ${glow(color)}` : 'none', display: 'inline-block' }} />
 }
 
 export function Label({ children, style }) {
@@ -83,14 +83,14 @@ export function TextInput({ style, ...rest }) {
   const { accent } = useTheme()
   const [focus, setFocus] = useState(false)
   return <input {...rest} onFocus={e => { setFocus(true); rest.onFocus?.(e) }} onBlur={e => { setFocus(false); rest.onBlur?.(e) }}
-    style={{ ...fieldStyle(accent), borderColor: focus ? accent + '80' : C.line2, ...style }} />
+    style={{ ...fieldStyle(accent), borderColor: focus ? alpha(accent, '80') : C.line2, ...style }} />
 }
 
 export function TextArea({ style, ...rest }) {
   const { accent } = useTheme()
   const [focus, setFocus] = useState(false)
   return <textarea {...rest} onFocus={e => { setFocus(true); rest.onFocus?.(e) }} onBlur={e => { setFocus(false); rest.onBlur?.(e) }}
-    style={{ ...fieldStyle(accent), borderColor: focus ? accent + '80' : C.line2, lineHeight: 1.5, ...style }} />
+    style={{ ...fieldStyle(accent), borderColor: focus ? alpha(accent, '80') : C.line2, lineHeight: 1.5, ...style }} />
 }
 
 export function Select({ style, children, ...rest }) {
@@ -112,8 +112,8 @@ export function Toaster() {
   return (
     <div style={{
       position: 'fixed', bottom: 22, left: '50%', transform: 'translateX(-50%)', zIndex: 100,
-      fontFamily: MONO, fontSize: 11, color: accent, background: '#0b0b0dee', border: `1px solid ${accent}55`,
-      boxShadow: `0 0 20px ${accent}30`, padding: '8px 14px', borderRadius: 8, pointerEvents: 'none',
+      fontFamily: MONO, fontSize: 11, color: accent, background: alpha(C.field, 'ee'), border: `1px solid ${alpha(accent, '55')}`,
+      boxShadow: `0 0 20px ${glow(accent, '30')}`, padding: '8px 14px', borderRadius: 8, pointerEvents: 'none',
       opacity: msg ? 1 : 0, transition: 'opacity .2s',
     }}>{msg}</div>
   )

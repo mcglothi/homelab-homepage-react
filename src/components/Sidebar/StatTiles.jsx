@@ -1,19 +1,20 @@
+import { C, alpha } from '../../ui/theme'
 export function StatTiles({ adguard, weather }) {
   const stats = [
-    { label: 'DNS BLOCK', val: adguard?.blocked != null ? `${adguard.blocked}%` : '—', color: '#39ff5a' },
-    { label: 'WEATHER', val: weather?.temp != null ? `${weather.temp}°F` : '—', color: '#00bfff' },
+    { label: 'DNS BLOCK', val: adguard?.blocked != null ? `${adguard.blocked}%` : '—', color: C.green },
+    { label: 'WEATHER', val: weather?.temp != null ? `${weather.temp}°F` : '—', color: C.blue },
   ]
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
       {stats.map(s => (
         <div key={s.label} style={{
-          background: 'rgba(255,255,255,0.03)', border: '1px solid #ffffff10',
+          background: alpha(C.text, 0.03), border: `1px solid ${alpha(C.text, '10')}`,
           borderRadius: 10, padding: '12px', textAlign: 'center',
         }}>
           <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 18, fontWeight: 600, color: s.color }}>
             {s.val}
           </div>
-          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', marginTop: 4, letterSpacing: 1 }}>
+          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: C.faint, marginTop: 4, letterSpacing: 1 }}>
             {s.label}
           </div>
         </div>

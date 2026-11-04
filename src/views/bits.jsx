@@ -1,4 +1,4 @@
-import { C, LEVEL, MONO, SANS, useTheme } from '../ui/theme'
+import { C, LEVEL, MONO, SANS, useTheme, alpha } from '../ui/theme'
 import { Dot, Panel, SectionTitle } from '../ui/primitives'
 
 // Layout pieces shared by the AIKB / Watch / HA tabs.
@@ -30,7 +30,7 @@ export function Tiles({ children }) {
 export function Tile({ label, value, sub, color, title }) {
   const { cardRadius } = useTheme()
   return (
-    <div title={title} style={{ background: C.panel, border: `1px solid ${(color || '#ffffff') + '22'}`, borderRadius: cardRadius, padding: '12px 14px' }}>
+    <div title={title} style={{ background: C.panel, border: `1px solid ${(color || C.bright) + '22'}`, borderRadius: cardRadius, padding: '12px 14px' }}>
       <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: 1.5, color: C.dim, textTransform: 'uppercase' }}>{label}</div>
       <div style={{ fontFamily: SANS, fontWeight: 700, fontSize: 24, color: color || C.text, marginTop: 4, lineHeight: 1.1 }}>{value ?? '—'}</div>
       {sub && <div style={{ fontFamily: MONO, fontSize: 10, color: C.muted, marginTop: 4 }}>{sub}</div>}
@@ -96,7 +96,7 @@ export function FeedBadge({ feed, name }) {
 export function Bar({ value, max, color }) {
   const { accent } = useTheme()
   return (
-    <div style={{ flex: 1, height: 5, background: '#ffffff0c', borderRadius: 3, overflow: 'hidden', alignSelf: 'center' }}>
+    <div style={{ flex: 1, height: 5, background: alpha(C.text, '0c'), borderRadius: 3, overflow: 'hidden', alignSelf: 'center' }}>
       <div style={{ width: `${Math.max(2, (value / (max || 1)) * 100)}%`, height: '100%', background: color || accent, borderRadius: 3 }} />
     </div>
   )

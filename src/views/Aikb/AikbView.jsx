@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { C, MONO } from '../../ui/theme'
+import { C, MONO, alpha } from '../../ui/theme'
 import { Button, Pill } from '../../ui/primitives'
 import { ago, hoursLabel, useFeed } from '../../api/feeds'
 import { AlertList, Bar, Card, Columns, FeedBadge, Muted, Row, Tile, Tiles, ViewShell } from '../bits'
@@ -134,7 +134,7 @@ function CommitSpark({ perDay }) {
     <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: 46, marginTop: 12 }}>
       {days.map(([d, n]) => (
         <div key={d} title={`${d}: ${n} commits`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-          <div style={{ width: '100%', height: Math.max(2, (n / max) * 32), background: '#ffffff30', borderRadius: 2 }} />
+          <div style={{ width: '100%', height: Math.max(2, (n / max) * 32), background: alpha(C.text, '30'), borderRadius: 2 }} />
           <Muted style={{ fontSize: 8 }}>{d.slice(8)}</Muted>
         </div>
       ))}

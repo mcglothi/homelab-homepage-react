@@ -5,6 +5,7 @@ import { StatusDot } from '../shared/StatusDot'
 import { AnimatedValue } from './AnimatedValue'
 import { OpenSoakCard } from './OpenSoakCard'
 import { MediaSweepCard } from './MediaSweepCard'
+import { C, alpha } from '../../ui/theme'
 
 export function ServiceCard({ svc, accent, cardRadius = 12, entranceDelay = 0, liveData }) {
   const [hovered, setHovered] = useState(false)
@@ -30,14 +31,14 @@ export function ServiceCard({ svc, accent, cardRadius = 12, entranceDelay = 0, l
       onMouseLeave={() => setHovered(false)}
       style={{
         display: 'flex', flexDirection: 'column',
-        background: hovered ? `${svc.color}14` : `${svc.color}06`,
-        border: `1px solid ${hovered ? svc.color + '70' : svc.color + '25'}`,
+        background: hovered ? `${alpha(svc.color, '14')}` : `${alpha(svc.color, '06')}`,
+        border: `1px solid ${hovered ? alpha(svc.color, '70') : alpha(svc.color, '25')}`,
         borderRadius: cardRadius,
         padding: '14px 16px',
         cursor: 'pointer',
         transition: 'all 0.18s ease',
         backdropFilter: 'blur(8px)',
-        boxShadow: hovered ? `0 4px 28px ${svc.color}22` : `0 1px 8px ${svc.color}08`,
+        boxShadow: hovered ? `0 4px 28px ${alpha(svc.color, '22')}` : `0 1px 8px ${alpha(svc.color, '08')}`,
         overflow: 'hidden',
         opacity: visible ? 1 : 0,
         transform: visible ? 'translateY(0)' : 'translateY(12px)',
@@ -50,17 +51,17 @@ export function ServiceCard({ svc, accent, cardRadius = 12, entranceDelay = 0, l
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
             <span style={{
               fontSize: 14, fontWeight: 600,
-              color: hovered ? '#fff' : '#ccc',
+              color: hovered ? C.bright : C.body,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>{svc.name}</span>
             <StatusDot online={liveData?.online ?? null} title={dotTitle(liveData)} />
           </div>
           <div style={{
-            fontSize: 11, color: '#555', fontFamily: "'JetBrains Mono',monospace",
+            fontSize: 11, color: C.dim, fontFamily: "'JetBrains Mono',monospace",
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
             {liveData?.certDays != null && liveData.certDays < 30 && (
-              <span title="TLS certificate expiry" style={{ color: liveData.certDays < 7 ? '#ff4d4f' : '#ffab00' }}>
+              <span title="TLS certificate expiry" style={{ color: liveData.certDays < 7 ? C.red : C.amber }}>
                 cert {liveData.certDays}d ·{' '}
               </span>
             )}
@@ -70,7 +71,7 @@ export function ServiceCard({ svc, accent, cardRadius = 12, entranceDelay = 0, l
       </div>
       {details && details.length > 0 && (
         <div style={{
-          marginTop: 12, paddingTop: 10, borderTop: `1px solid ${svc.color}20`,
+          marginTop: 12, paddingTop: 10, borderTop: `1px solid ${alpha(svc.color, '20')}`,
           display: 'grid',
           gridTemplateColumns: `repeat(${Math.min(details.length, 3)}, 1fr)`,
           gap: 6,
@@ -79,11 +80,11 @@ export function ServiceCard({ svc, accent, cardRadius = 12, entranceDelay = 0, l
             <div key={d.k} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span style={{
                 fontFamily: "'JetBrains Mono',monospace", fontSize: 9,
-                color: '#444', letterSpacing: 1, textTransform: 'uppercase', whiteSpace: 'nowrap',
+                color: C.faint, letterSpacing: 1, textTransform: 'uppercase', whiteSpace: 'nowrap',
               }}>{d.k}</span>
               {visible
-                ? <AnimatedValue raw={d.v} color={hovered ? svc.color : svc.color + 'cc'} size={12} />
-                : <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: svc.color + 'cc', fontWeight: 600 }}>—</span>
+                ? <AnimatedValue raw={d.v} color={hovered ? svc.color : alpha(svc.color, 'cc')} size={12} />
+                : <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: alpha(svc.color, 'cc'), fontWeight: 600 }}>—</span>
               }
             </div>
           ))}
