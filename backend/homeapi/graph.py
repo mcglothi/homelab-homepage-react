@@ -11,17 +11,21 @@ Edge flags: "inferred" (an app matched by its default port, not a published one)
 "missing" (a proxy forwarding to an address no host claims), "derived" (joined by IP).
 
 Node ids: h: host, pl: pool, ds: dataset, a: app, px: proxy name, d: DNS name, svc: card,
-ip: an address with no host, t: monitoring target, q: the search.
+ip: an address with no host, t: monitoring target, n: an AIKB note, q: the search.
+AIKB notes join last: host or app -> each note that mentions it (AIKB_SEARCH_URL /mentions),
+only for the start nodes (or the node being expanded), so the graph stays readable.
 """
 
 from collections import defaultdict
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 from . import fleet, routes
-from .common import fetch_local
+from .common import fetch_local, parallel, settle
 
 CAP = 400      # nodes per graph; `truncated` says when it bites
 DEPTH = 2      # hops from the start nodes
+NOTE_LOOKUPS = 6   # hosts/apps asked about per graph
+NOTES_EACH = 5     # notes per host/app
 
 
 def _gb(n):
@@ -130,6 +134,28 @@ def _around(start, edges, depth):
     return seen
 
 
+def _notes(ids, nodes):
+    """AIKB notes that mention these hosts/apps/cards, as extra nodes and edges. None when AIKB is down."""
+    asks = [i for i in ids if nodes[i]["kind"] in ("host", "app", "service")][:NOTE_LOOKUPS]
+    if not asks:
+        return {}, []
+    url = routes.AIKB_SEARCH_URL() + "/mentions?"
+    found = parallel(*[(lambda i=i: settle(lambda: fetch_local(url + urlencode({"name": nodes[i]["label"], "limit": NOTES_EACH}), timeout=4)))
+                       for i in asks])
+    # fetch_local hands back an error body as JSON (a 500 from a locked index), so that counts as down too
+    if all(not isinstance(f, dict) or "error" in f for f in found):
+        return None, []
+    out, edges = {}, []
+    for i, f in zip(asks, found):
+        for n in (f or {}).get("notes") or []:
+            nid = "n:" + n["file"]
+            out.setdefault(nid, {"id": nid, "kind": "note", "label": n.get("title") or n["file"], "sub": n["file"],
+                                 "attrs": [["File", n["file"]], ["Open", "/aikb/note?path=" + quote(n["file"], safe="")], ["Source", "AIKB"]]})
+            edges.append({"a": i, "b": nid, "kind": "about", "label": "mentions", "flag": None,
+                          "detail": "section: %s" % n.get("section") if n.get("section") else None, "via": "AIKB"})
+    return out, edges
+
+
 def build(q, expand=None, live=False):
     F = fleet.get()
     nodes, edges = _all(F, live=live)
@@ -145,7 +171,15 @@ def build(q, expand=None, live=False):
         keep = set(seeds[:CAP]) | set(sorted(keep - set(seeds), key=lambda i: (nodes[i]["kind"] == "proxy", i))[:max(0, CAP - len(seeds))])
     out_nodes = [dict(nodes[i], result=i in seeds) for i in keep]
     out_edges = [e for e in edges if e["a"] in keep and e["b"] in keep]
+    warnings = []
+    if not (q.strip() in ("*", "all") and not expand):
+        notes, note_edges = _notes([s for s in seeds if s in keep], nodes)
+        if notes is None:
+            warnings.append("AIKB is unreachable, so notes are left out")
+        else:
+            out_nodes += [dict(n, result=False) for n in notes.values()]
+            out_edges += note_edges
     hosts = [s for s in seeds if s.startswith("h:")]
     return {"q": q, "nodes": out_nodes, "edges": out_edges, "seeds": seeds[:50], "listed": seeds, "matched": len(seeds),
             "resolved": nodes[hosts[0]]["label"] if len(hosts) == 1 else None, "truncated": truncated,
-            "coverage": {"list": len(seeds), "covered": len(seeds), "nodes": len(seeds), "groups": []}, "warnings": []}
+            "coverage": {"list": len(seeds), "covered": len(seeds), "nodes": len(seeds), "groups": []}, "warnings": warnings}

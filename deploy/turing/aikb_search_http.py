@@ -91,8 +91,15 @@ class App:
     def search(self, query, count):
         # Notes only: the index also holds agent event logs (_runtime/*.json), which the viewer can't open
         with self.search_lock:
-            results = self.search_fn(query, top_k=count * 3, use_usage_stats=True)
-        results = [r for r in results if r.get("file", "").endswith(".md") and not r["file"].startswith("_runtime/")][:count]
+            results = self.search_fn(query, top_k=count * 4, use_usage_stats=True)
+        notes, seen = [], set()
+        for r in results:
+            f = r.get("file", "")
+            # One row per note, its best section: a long note otherwise fills every slot
+            if f.endswith(".md") and not f.startswith("_runtime/") and f not in seen:
+                seen.add(f)
+                notes.append(r)
+        results = notes[:count]
         entities = self.chunk_entities(results)
         return [{
             "file": item.get("file", ""), "section": item.get("section", "overview"),
@@ -122,19 +129,24 @@ class App:
                 "mtime": iso(path.stat().st_mtime), "content": path.read_text(encoding="utf-8")}
 
     def mentions(self, name, limit):
+        # A name can be indexed under several kinds (vaultwarden: file, plex: file, sonarr: tag), so match them all.
+        # One row per note, the notes that mention it most first; the section is the newest chunk's (SQLite's MAX rule).
         with self.connect() as conn:
-            entity = conn.execute("SELECT id, kind FROM entities WHERE name=?", (name,)).fetchone()
-            if not entity:
+            kinds = [k for (k,) in conn.execute("SELECT DISTINCT kind FROM entities WHERE lower(name)=lower(?)", (name,))]
+            if not kinds:
                 return {"name": name, "kind": None, "notes": []}
-            rows = conn.execute("""SELECT c.file_path, c.section, MAX(c.mtime) AS newest
-                                   FROM entity_chunks ec JOIN chunks c ON c.id=ec.chunk_id
-                                   WHERE ec.entity_id=? AND c.file_path LIKE '%.md'
+            rows = conn.execute("""SELECT c.file_path, c.section, MAX(c.mtime) AS newest, COUNT(DISTINCT c.id) AS hits
+                                   FROM entities e JOIN entity_chunks ec ON ec.entity_id=e.id JOIN chunks c ON c.id=ec.chunk_id
+                                   WHERE lower(e.name)=lower(?) AND c.file_path LIKE '%.md'
                                      AND substr(c.file_path, 1, 9) != '_runtime/' AND c.file_path NOT LIKE '.%'
-                                   GROUP BY c.file_path, c.section
-                                   ORDER BY newest DESC LIMIT ?""", (entity[0], limit)).fetchall()
-        return {"name": name, "kind": entity[1],
-                "notes": [{"file": file_path, "section": section, "title": self.title(file_path)}
-                          for file_path, section, _ in rows]}
+                                   GROUP BY c.file_path
+                                   ORDER BY hits DESC, newest DESC LIMIT ?""", (name, limit * 4)).fetchall()
+        # The note named after it (services/plex.md) leads, however few times it repeats the name
+        key = name.lower()
+        rows = sorted(rows, key=lambda r: key not in Path(r[0]).stem.lower())[:limit]
+        return {"name": name, "kind": "host" if "host" in kinds else kinds[0],
+                "notes": [{"file": file_path, "section": section, "title": self.title(file_path), "hits": hits}
+                          for file_path, section, _, hits in rows]}
 
 
 class Handler(BaseHTTPRequestHandler):

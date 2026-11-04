@@ -4,6 +4,7 @@ import { Button } from '../../ui/primitives'
 import { EASE } from '../../ui/motion'
 import { KIND, agoText, ageDays as recAge, isDated } from './analysis'
 import { relation } from './relations'
+import { link } from '../../router'
 
 // The Details card. For the selected node it puts what matters first: a compact header with a few key facts, the actions
 // pinned at the top, and the relations sorted into sections (People, Servers, ...) whose order depends on the kind of node.
@@ -119,6 +120,8 @@ export default function DetailsCard({ node, model, raw, rawById, byId, select, t
           <Button size="sm" onClick={onCenter} title="Center the camera on the selected node">Center</Button>
           <Button size="sm" variant={isoHere ? 'primary' : 'default'} onClick={() => onIsolate(isoHere ? null : node.id)} title="Isolate: show only this node and its neighbors">{isoHere ? '✓ Isolated' : 'Isolate'}</Button>
           <Button size="sm" variant="primary" disabled={!onSearch} onClick={() => onSearch(node.id)} title="Search for this: run a new search and redraw the graph">Search for this</Button>
+          {node.kind === 'note' && (() => { const href = node.attrs?.find(([k]) => k === 'Open')?.[1]
+            return href && <Button size="sm" onClick={link(href)} title="Open the note in the AIKB viewer">Open note</Button> })()}
           <Button size="sm" variant={picked ? 'primary' : 'default'} onClick={onCompare} title="Add this node to the compare tray (Shift-click does the same)">{picked ? '✓ In compare' : '+ Compare'}</Button>
         </div>
         {sections.length > 0 && (
@@ -164,7 +167,8 @@ export default function DetailsCard({ node, model, raw, rawById, byId, select, t
           <a onClick={() => setAttrsOpen(o => !o)} style={{ fontSize: 11, color: C.accent, cursor: 'pointer' }}>{attrsOpen ? '▾' : '▸'} Attributes ({allAttrs.length})</a>
           <Collapse open={attrsOpen}>
             <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 10px', margin: '6px 0', fontSize: 11.5 }}>
-              {allAttrs.map(([k, v], i) => [<dt key={'k' + i} style={{ color: C.dim }}>{k}</dt>, <dd key={'v' + i} style={{ margin: 0, fontFamily: MONO, wordBreak: 'break-word', color: C.text }}>{/^https?:\/\//.test(String(v)) ? <a href={v} target="_blank" rel="noreferrer" style={{ color: C.accent }}>open ↗</a> : String(v)}</dd>])}
+              {allAttrs.map(([k, v], i) => [<dt key={'k' + i} style={{ color: C.dim }}>{k}</dt>, <dd key={'v' + i} style={{ margin: 0, fontFamily: MONO, wordBreak: 'break-word', color: C.text }}>{/^https?:\/\//.test(String(v)) ? <a href={v} target="_blank" rel="noreferrer" style={{ color: C.accent }}>open ↗</a>
+                : /^\/aikb\//.test(String(v)) ? <a href={v} onClick={link(v)} style={{ color: C.accent }}>open note</a> : String(v)}</dd>])}
             </dl>
           </Collapse>
         </div>
