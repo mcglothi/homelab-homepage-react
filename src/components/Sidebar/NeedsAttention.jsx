@@ -1,10 +1,12 @@
 import { useFeed } from '../../api/feeds'
 import { link } from '../../router'
 import { AlertList } from '../../views/bits'
+import { SectionHeader, useCollapsed } from './Section'
 
 // The few things across Docket's tabs that want a human: AIKB warnings and the
 // watch job's health. Informational items stay on their tabs.
 export function NeedsAttention({ accent }) {
+  const collapsed = useCollapsed('Needs Attention')
   const aikb = useFeed('/api/aikb/health', 120000)
   const watch = useFeed('/api/watch/status', 120000)
   const alerts = []
@@ -21,12 +23,12 @@ export function NeedsAttention({ accent }) {
 
   return (
     <div>
-      <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, letterSpacing: 2, color: accent, marginBottom: 10 }}>
-        NEEDS ATTENTION
-      </div>
+      <SectionHeader id="Needs Attention" accent={accent} title="Needs Attention" />
+      {!collapsed && (<>
       <div onClick={e => { const a = e.target.closest('a'); if (a) link(a.getAttribute('href'))(e) }}>
         <AlertList alerts={alerts.slice(0, 7)} empty={aikb.loading || watch.loading ? 'checking…' : 'all clear'} />
       </div>
+      </>)}
     </div>
   )
 }

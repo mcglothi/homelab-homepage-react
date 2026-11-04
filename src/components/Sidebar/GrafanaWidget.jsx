@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Sparkline } from '../shared/Sparkline'
 import { C, alpha } from '../../ui/theme'
+import { SectionHeader, useCollapsed } from './Section'
 
 export function GrafanaWidget({ accent, data }) {
+  const collapsed = useCollapsed('Grafana')
   const [tick, setTick] = useState(0)
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 3000)
@@ -25,10 +27,10 @@ export function GrafanaWidget({ accent, data }) {
 
   return (
     <div style={{ background: alpha(C.text, 0.03), border: `1px solid ${alpha(C.text, '10')}`, borderRadius: 12, padding: '14px 16px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: '#f46800', letterSpacing: 3, textTransform: 'uppercase' }}>Grafana</div>
+      <SectionHeader id="Grafana" accent={'#f46800'} title="Grafana">
         <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: C.faint }}>babbage</div>
-      </div>
+      </SectionHeader>
+      {!collapsed && (<>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {rows.map(row => (
           <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -40,6 +42,7 @@ export function GrafanaWidget({ accent, data }) {
           </div>
         ))}
       </div>
+      </>)}
     </div>
   )
 }

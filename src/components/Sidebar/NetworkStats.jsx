@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { C, alpha } from '../../ui/theme'
+import { SectionHeader, useCollapsed } from './Section'
 
 export function NetworkStats({ accent, data }) {
+  const collapsed = useCollapsed('Network')
   const [tick, setTick] = useState(0)
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 2000)
@@ -14,9 +16,8 @@ export function NetworkStats({ accent, data }) {
 
   return (
     <div style={{ background: alpha(C.text, 0.03), border: `1px solid ${alpha(C.text, '10')}`, borderRadius: 12, padding: '14px 16px' }}>
-      <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: C.blue, letterSpacing: 3, marginBottom: 12, textTransform: 'uppercase' }}>
-        Network
-      </div>
+      <SectionHeader id="Network" accent={C.blue} title="Network" />
+      {!collapsed && (<>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
         {[
           { label: '↓ DOWN', val: down, unit: 'MB/s', color: C.green },
@@ -30,6 +31,7 @@ export function NetworkStats({ accent, data }) {
           </div>
         ))}
       </div>
+      </>)}
     </div>
   )
 }
