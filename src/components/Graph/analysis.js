@@ -332,3 +332,32 @@ export function diversity(nodes, edges) {
   const label = topShare > 0.5 ? 'biased' : q < 0.3 ? 'focused' : q < 0.6 ? 'diversified' : 'dispersed'
   return { q, topShare, label }
 }
+
+// Rare cross-topic, cross-kind links are the ones most worth a second look.
+export function surprising(nodes, edges, n = 5) {
+  const byId = new Map(nodes.map(x => [x.id, x]))
+  const given = nodes.every(x => Number.isFinite(x.deg))
+  const deg = new Map(nodes.map(x => [x.id, given ? x.deg : 0]))
+  if (!given) edges.forEach(e => { deg.set(e.a, (deg.get(e.a) || 0) + 1); deg.set(e.b, (deg.get(e.b) || 0) + 1) })
+  const hubs = new Set(nodes.slice().sort((a, b) => b.bc - a.bc).slice(0, 3).map(x => x.id))
+  // '+N more' fold nodes are placeholders, not things
+  return edges.map(e => ({ ...e, a: byId.get(e.a), b: byId.get(e.b) }))
+    .filter(e => e.a && e.b && !e.a.fold && !e.b.fold && e.a.comm !== e.b.comm && e.a.kind !== e.b.kind && !hubs.has(e.a.id) && !hubs.has(e.b.id))
+    .map(e => ({ a: e.a.id, b: e.b.id, label: e.label || e.kind, score: 1 / (Math.max(1, deg.get(e.a.id)) * Math.max(1, deg.get(e.b.id))) }))
+    .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label) || a.a.localeCompare(b.a)).slice(0, n)
+}
+
+export function suggestions(model, q, n = 5) {
+  const nodes = (model?.nodes || []).filter(x => !x.fold)
+  const text = String(q || '').trim().toLowerCase()
+  const out = []
+  const add = value => { if (value && value.toLowerCase() !== text && !out.includes(value) && out.length < n) out.push(value) }
+  const groups = new Map()
+  nodes.forEach(x => { const a = groups.get(x.comm) || []; a.push(x); groups.set(x.comm, a) })
+  const largest = [...groups.values()].sort((a, b) => b.length - a.length).slice(0, 2)
+  const hub = g => g.slice().sort((a, b) => b.bc - a.bc)[0].label
+  if (largest.length === 2 && hub(largest[0]) !== hub(largest[1])) add(`${hub(largest[0])} .. ${hub(largest[1])}`)
+  nodes.filter(x => x.kind === 'host' && x.label.toLowerCase() !== text).slice().sort((a, b) => (b.deg || 0) - (a.deg || 0)).forEach(x => add(`host:${x.label}`))
+  if (model?.lens === 'concepts' || nodes.some(x => x.kind === 'concept')) nodes.filter(x => x.kind === 'concept' && x.label.toLowerCase() !== text).slice().sort((a, b) => (b.count || 0) - (a.count || 0) || (b.deg || 0) - (a.deg || 0)).forEach(x => add(`kb: ${x.label}`))
+  return out
+}

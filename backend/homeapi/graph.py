@@ -18,7 +18,7 @@ also starts from the notes AIKB finds for it (/search), joined to the fleet node
 (/links); `kb:` searches start from notes only. Expanding a note adds what it names.
 """
 
-from collections import defaultdict
+from collections import defaultdict, deque
 import json
 import re
 from urllib.parse import quote, urlencode, urlsplit
@@ -31,6 +31,19 @@ DEPTH = 2      # hops from the start nodes
 NOTE_LOOKUPS = 6   # hosts/apps asked about per graph
 NOTES_EACH = 5     # notes per host/app
 NOTE_SEEDS = 8     # notes a text search starts from
+
+
+def _provenance(kind, flag=None, via=None):
+    """One policy for every graph edge, including future edge kinds."""
+    if flag in ("missing", "ambiguous"):
+        return "ambiguous"
+    if flag in ("inferred", "derived") or kind == "cooccur":
+        return "inferred"
+    return "extracted"
+
+
+def _with_provenance(edges):
+    return [dict(e, prov=_provenance(e.get("kind"), e.get("flag"), e.get("via"))) for e in edges]
 
 
 def _gb(n):
@@ -48,7 +61,8 @@ def _all(F, live=False):
     def edge(a, b, kind, label, flag=None, via=None, detail=None):
         if a in nodes and b in nodes and (a, b, kind) not in eseen:
             eseen.add((a, b, kind))
-            edges.append({"a": a, "b": b, "kind": kind, "label": label, "flag": flag, "detail": detail, "via": via})
+            edges.append({"a": a, "b": b, "kind": kind, "label": label, "flag": flag, "detail": detail, "via": via,
+                          "prov": _provenance(kind, flag, via)})
 
     for h in F["hosts"].values():
         node("h:" + h["name"], "host", h["name"], h.get("role") or ", ".join(h["ips"]),
@@ -152,9 +166,9 @@ def _note(file, title=None):
             "attrs": [["File", file], ["Open", "/aikb/note?path=" + quote(file, safe="")], ["Source", "AIKB"]]}
 
 
-def _mention(a, nid, section=None):
-    return {"a": a, "b": nid, "kind": "about", "label": "mentions", "flag": None,
-            "detail": "section: %s" % section if section else None, "via": "AIKB"}
+def _mention(a, nid, section=None, flag=None):
+    return {"a": a, "b": nid, "kind": "about", "label": "mentions", "flag": flag,
+            "detail": "section: %s" % section if section else None, "via": "AIKB", "prov": _provenance("about", flag, "AIKB")}
 
 
 def _notes(ids, nodes):
@@ -188,7 +202,8 @@ def _joins(files, nodes, F):
         for e in names:
             name = (e.get("name") or "").lower()
             ids = by.get(name) or (["h:" + F["ip_of"][name]] if e.get("kind") == "ip" and name in F["ip_of"] else [])
-            edges += [_mention(i, "n:" + file) for i in ids if i in nodes]
+            # A shared label cannot say which fleet thing the note intended.
+            edges += [_mention(i, "n:" + file, flag="ambiguous" if len(ids) > 1 else None) for i in ids if i in nodes]
     return edges, got.get("titles") or {}
 
 
@@ -227,9 +242,101 @@ def _concept_graph(q, expand, F, videos=False):
         a, b = by_name.get(str(edge.get("a", "")).lower()), by_name.get(str(edge.get("b", "")).lower())
         if a and b:
             edges.append({"a": a["id"], "b": b["id"], "kind": "cooccur", "label": "appear together", "detail": "in %s chunks" % edge.get("w", 0), "via": "AIKB", "flag": None, "w": edge.get("w", 0)})
-    return {"q": q, "lens": "concepts", "nodes": [dict(n, result=n["id"] in seeds) for n in nodes], "edges": edges,
+    return {"q": q, "lens": "concepts", "nodes": [dict(n, result=n["id"] in seeds) for n in nodes], "edges": _with_provenance(edges),
             "seeds": seeds, "listed": seeds, "matched": len(seeds), "resolved": None, "truncated": False,
             "coverage": {"list": len(seeds), "covered": len(seeds), "nodes": len(seeds), "groups": []}, "warnings": []}
+
+
+# Which match a path end means when a name hits several nodes: the thing itself before where it lives
+END_ORDER = {k: i for i, k in enumerate(("host", "app", "service", "proxy", "dns", "dataset", "pool", "target", "network"))}
+
+
+def _path_seed(text, nodes, warnings, extra):
+    """The node a path end names; with no fleet match, AIKB's best note for it (added to `extra`)."""
+    t = text.strip().lower()
+    matches = sorted(_seeds(text, nodes), key=lambda i: (nodes[i]["label"].lower() != t, END_ORDER.get(nodes[i]["kind"], 99)))
+    if not matches:
+        found = _aikb("/search", q=text, k=1)
+        hit = ((found or {}).get("results") or [None])[0]
+        if not hit:
+            warnings.append("nothing matches '%s'" % text)
+            return None
+        nid = "n:" + hit["file"]
+        extra[nid] = _note(hit["file"], hit.get("title"))
+        warnings.append("'%s' isn't in the fleet; using the note %s" % (text, extra[nid]["label"]))
+        return nid
+    picked = matches[0]
+    if len(matches) > 1:
+        warnings.append("'%s' matches %s nodes; using %s (%s)" % (text, len(matches), nodes[picked]["label"], nodes[picked]["kind"]))
+    return picked
+
+
+def _path_routes(start, end, edges):
+    """The first three BFS routes are shortest; simple paths keep loops out of the answer."""
+    adj = defaultdict(list)
+    for e in edges:
+        adj[e["a"]].append((e["b"], e))
+        adj[e["b"]].append((e["a"], e))
+    queue, routes, middles = deque([(start, [start], [])]), [], set()
+    while queue and len(routes) < 3:
+        here, ids, path_edges = queue.popleft()
+        if here == end:
+            middle = frozenset(ids[1:-1])
+            if middle not in middles:
+                middles.add(middle)
+                provs = [e["prov"] for e in path_edges]
+                confidence = "ambiguous" if "ambiguous" in provs else "inferred" if "inferred" in provs else "extracted"
+                routes.append({"ids": ids, "hops": len(path_edges), "confidence": confidence, "edges": path_edges})
+            continue
+        if len(path_edges) == 6:
+            continue
+        for other, edge in adj[here]:
+            if other not in ids:
+                queue.append((other, ids + [other], path_edges + [edge]))
+    return routes
+
+
+def _path_graph(q, F, nodes, edges):
+    ends = search.parse_path(q)
+    warnings, ends_extra = [], {}
+    start = _path_seed(ends[0], nodes, warnings, ends_extra)
+    end = _path_seed(ends[1], nodes, warnings, ends_extra)
+    payload = {"from": start, "to": end, "routes": []}
+    if not start or not end:
+        return {"q": q, "nodes": [], "edges": [], "seeds": [], "listed": [], "matched": 0, "resolved": None, "truncated": False,
+                "coverage": {"list": 0, "covered": 0, "nodes": 0, "groups": []}, "warnings": warnings, "path": payload}
+    # Only notes tied to either endpoint are bridges; their /links give the other end of each note relation.
+    # An end that is itself a note joins through what it names.
+    notes, note_edges = _notes([i for i in (start, end) if i in nodes], nodes)
+    if notes is not None:
+        notes = {**ends_extra, **notes}
+    bridge_nodes, bridge_edges = {}, []
+    if notes is None:
+        warnings.append("AIKB is unreachable, so note bridges are left out")
+    else:
+        bridge_nodes = notes
+        joins, titles = _joins([i[2:] for i in notes], nodes, F) if notes else ([], {})
+        if joins is None:
+            warnings.append("AIKB is unreachable, so note bridges are left out")
+            bridge_nodes, note_edges, joins = {}, [], []
+        else:
+            for nid, title in titles.items():
+                if "n:" + nid in bridge_nodes and title:
+                    bridge_nodes["n:" + nid]["label"] = title
+            bridge_edges = (note_edges or []) + (joins or [])
+    all_nodes = {**nodes, **bridge_nodes}
+    all_edges = _with_provenance(edges + bridge_edges)
+    routes = _path_routes(start, end, all_edges)
+    payload["routes"] = [{k: v for k, v in route.items() if k != "edges"} for route in routes]
+    if not routes:
+        warnings.append("no path from '%s' to '%s' within 6 hops" % ends)
+        return {"q": q, "nodes": [], "edges": [], "seeds": [start, end], "listed": [start, end], "matched": 2, "resolved": None, "truncated": False,
+                "coverage": {"list": 2, "covered": 0, "nodes": 0, "groups": []}, "warnings": warnings, "path": payload}
+    keep = {i for route in routes for i in route["ids"]}
+    route_edges = {(e["a"], e["b"], e["kind"]) for route in routes for e in route["edges"]}
+    out_edges = [e for e in all_edges if (e["a"], e["b"], e["kind"]) in route_edges]
+    return {"q": q, "nodes": [dict(all_nodes[i], result=i in (start, end)) for i in keep], "edges": out_edges, "seeds": [start, end], "listed": [start, end], "matched": 2,
+            "resolved": None, "truncated": False, "coverage": {"list": 2, "covered": 2, "nodes": len(keep), "groups": []}, "warnings": warnings, "path": payload}
 
 
 def build(q, expand=None, live=False, lens=None, videos=False):
@@ -237,6 +344,9 @@ def build(q, expand=None, live=False, lens=None, videos=False):
     if lens == "concepts":
         return _concept_graph(q, expand, F, videos)
     nodes, edges = _all(F, live=live)
+    edges = _with_provenance(edges)
+    if not expand and search.parse_path(q):
+        return _path_graph(q, F, nodes, edges)
     everything = not expand and q.strip() in ("*", "all")
     # host:/app:/media:/kb: prefixes as the search bar has them; kb: starts from notes only
     scope, text = search.parse_scope(q)
@@ -295,7 +405,7 @@ def build(q, expand=None, live=False, lens=None, videos=False):
     seen = set()
     out_edges = [e for e in out_edges if (e["a"], e["b"], e["kind"]) not in seen and not seen.add((e["a"], e["b"], e["kind"]))]
     hosts = [s for s in seeds if s.startswith("h:")]
-    return {"q": q, "nodes": list(out.values()), "edges": out_edges, "seeds": seeds[:50], "listed": seeds, "matched": len(seeds),
+    return {"q": q, "nodes": list(out.values()), "edges": _with_provenance(out_edges), "seeds": seeds[:50], "listed": seeds, "matched": len(seeds),
             "resolved": nodes[hosts[0]]["label"] if len(hosts) == 1 else None, "truncated": truncated,
             "coverage": {"list": len(seeds), "covered": len(seeds), "nodes": len(seeds), "groups": []}, "warnings": warnings}
 

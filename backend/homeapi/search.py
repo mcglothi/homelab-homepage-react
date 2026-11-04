@@ -27,7 +27,18 @@ SCOPE_TAGS = {"hosts": {"host", "dns", "network", "vm", "servers"}, "apps": {"ap
 SCOPE_SOURCES = {"hosts": {"Prometheus"}, "apps": {"Prometheus"}, "media": {"Radarr", "Sonarr", "Watch"}, "aikb": {"AIKB"}}
 
 
+def parse_path(q):
+    """Two endpoints from `a .. b`, or the explicit `path: a -> b` / `path: a to b` forms."""
+    text = (q or "").strip()
+    m = re.match(r"^path\s*:\s*(.+?)\s*(?:->|\bto\b|\.\.)\s*(.+?)$", text, re.I)
+    if not m:
+        m = re.match(r"^(.+?)\s*\.\.\s*(.+?)$", text)
+    return (m.group(1).strip(), m.group(2).strip()) if m and m.group(1).strip() and m.group(2).strip() else None
+
+
 def kind_of(q):
+    if parse_path(q):
+        return "path"
     t = q.strip().lower()
     F = fleet.get()
     if fleet.is_ip(t):
@@ -61,6 +72,8 @@ def _host_item(h):
 
 
 def fast(q):
+    if parse_path(q):
+        return []
     F = fleet.get()
     groups = []
 
@@ -174,6 +187,8 @@ def _aikb(q):
 
 
 def plan(q):
+    if parse_path(q):
+        return "path", None, [("Path", lambda: _path(q))]
     kind = kind_of(q)
     sources = []
     if kind in ("host", "ip", "app"):
@@ -188,8 +203,31 @@ def _groups_of(res):
     return [g for g in (res if isinstance(res, list) else [res]) if g]
 
 
+def _path(q):
+    """The graph owns path resolution, notes and provenance; search only renders its routes."""
+    from . import graph  # graph imports parse_path above, so keep this local
+    data = graph.build(q)
+    by_id = {n["id"]: n for n in data.get("nodes") or []}
+    by_hop = {(e.get("a"), e.get("b")): e for e in data.get("edges") or []}
+    items = []
+    for route in (data.get("path") or {}).get("routes") or []:
+        ids = route.get("ids") or []
+        labels = [by_id.get(i, {}).get("label", i) for i in ids]
+        # Two nodes with one name in a route (the Containers pool and dataset) get their kind
+        labels = [("%s (%s)" % (l, by_id.get(i, {}).get("kind")) if labels.count(l) > 1 else l) for l, i in zip(labels, ids)]
+        detail = []
+        for a, b in zip(ids, ids[1:]):
+            e = by_hop.get((a, b)) or by_hop.get((b, a)) or {}
+            detail.append("%s —%s→ %s (%s, %s)" % (by_id.get(a, {}).get("label", a), e.get("label", e.get("kind", "links to")),
+                                                        by_id.get(b, {}).get("label", b), e.get("via") or "graph", e.get("prov", "extracted")))
+        items.append({"title": " → ".join(labels), "subtitle": "%s hop%s · %s" % (route.get("hops", 0), "" if route.get("hops", 0) == 1 else "s", route.get("confidence", "extracted")),
+                      "detail": "\n".join(detail)})
+    ends = parse_path(q) or ("", "")
+    return {"source": "path", "title": "How %s connects to %s" % ends, "items": items} if items else None
+
+
 def _scoped(scope, kind, resolved, sources, groups):
-    if not scope:
+    if not scope or kind == "path":
         return sources, groups
     return [(n, f) for n, f in sources if n in SCOPE_SOURCES[scope]], [g for g in groups if g["source"] in SCOPE_TAGS[scope]]
 
@@ -203,6 +241,9 @@ def search(q, mode="fast", scope=None):
     scope, q = parse_scope(q, scope)
     if len(q) < 2:
         return {"q": q, "kind": None, "groups": []}
+    if parse_path(q):
+        groups = _groups_of(_path(q))
+        return {"q": q, "asked": q, "kind": "path", "resolved": None, "mode": mode, "scope": scope, "groups": groups}
     kind, resolved, sources = plan(q)
     sources, local = _scoped(scope, kind, resolved, sources, fast(q))
     if mode != "full":

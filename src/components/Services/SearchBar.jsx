@@ -106,6 +106,7 @@ const TIPS = [
     ['babbage  ·  turing', 'a host: its pools, datasets, apps, proxy names, DNS and Prometheus targets'],
     ['10.10.10.50', 'an IP: the host that answers on it, and what forwards to it'],
     ['plex  ·  nextcloud', 'an app: where it runs, what it mounts, which proxy names reach it'],
+    ['plex .. vaultwarden', 'the shortest known paths between two things'],
     ['anything else', 'free text across the mirror, Radarr, Sonarr and the watch ledger'],
   ]],
   ['Scope: pick it in the dropdown, or type a prefix', [
