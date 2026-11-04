@@ -121,6 +121,9 @@ def _item_fields(value):
             "project": value.get("project"), "file": value.get("file")}
 
 
+_videos = Cached(600, lambda: [v for v in fetch_local(routes.WATCH_URL() + "/api/watch/recent?status=kept&limit=200", timeout=10) or [] if isinstance(v, dict)])
+
+
 def _whole_word_mentions(text, label):
     return bool(label and re.search(r"(?<!\w)%s(?!\w)" % re.escape(label), text, re.I))
 
@@ -271,6 +274,24 @@ def _all(F, live=False):
                 node(nid, "note", str(item["file"]).rsplit("/", 1)[-1][:-3], str(item["file"]),
                      [["File", str(item["file"])], ["Open", "/aikb/note?path=" + quote(str(item["file"]), safe="")], ["Source", "AIKB"]])
                 edge(iid, nid, "about", "mentioned in", via="AIKB")
+    # Kept YouTube videos from the watch ledger: each links to its AIKB note and to its channel when that
+    # channel has several. No fleet edges: of 200 titles none named an app, and host names (tesla, newton)
+    # are ordinary words, so title matching only made false links.
+    videos = [v for v in settle(_videos) or [] if v.get("id") and v.get("title") and v.get("status", "kept") == "kept"]
+    by_channel = defaultdict(list)
+    for v in videos:
+        by_channel[(v.get("channel") or "").lower()].append(v)
+    for v in videos:
+        note = v.get("note_path") if str(v.get("note_path") or "").endswith(".md") else None
+        vid = node("yt:" + v["id"], "video", v["title"], " · ".join(filter(None, [v.get("channel"), (v.get("first_seen") or "")[:10]])),
+                   [["Channel", v.get("channel") or "—"], ["Why kept", (v.get("reason") or "—")[:300]], ["Open", "https://youtu.be/" + v["id"]]]
+                   + ([["Notes", "/aikb/note?path=" + quote(note, safe="")]] if note else []))
+        if note:
+            nodes.setdefault("n:" + note, _note(note, v["title"]))
+            edge(vid, "n:" + note, "noted", "noted in", via="Watch")
+        if v.get("channel") and len(by_channel[v["channel"].lower()]) > 1:
+            cid = node("ch:" + v["channel"].lower(), "channel", v["channel"], _n(len(by_channel[v["channel"].lower()]), "kept video"))
+            edge(cid, vid, "published", "published", via="Watch")
     try:
         history = search.history()
     except Exception:  # noqa: BLE001 - Tautulli is optional
@@ -388,7 +409,7 @@ def _seeds(q, nodes):
     if not t:
         return []
     aliases = {"alerts": "alert", "certs": "cert", "certificates": "cert", "incidents": "incident",
-               "pending": "pending", "todo": "pending"}
+               "pending": "pending", "todo": "pending", "videos": "video", "youtube": "video"}
     if t in ("plex activity", "watched"):
         return [i for i, n in nodes.items() if n["kind"] == "title"]
     if t in aliases:
@@ -399,7 +420,7 @@ def _seeds(q, nodes):
     return [i for i, n in nodes.items() if t in n["label"].lower() or t in i.lower()]
 
 
-MEDIA_KINDS = ("viewer", "device", "title")
+MEDIA_KINDS = ("viewer", "device", "title", "video", "channel")
 AIKB_DOWN = "AIKB is unreachable, so notes are left out"
 
 
@@ -647,7 +668,9 @@ def build(q, expand=None, live=False, lens=None, videos=False):
             seeds = [] if notes_only else _seeds(text, nodes)
         if everything:
             keep = set(nodes)
-        elif scope == "media" or (seeds and all(nodes[i]["kind"] in MEDIA_KINDS for i in seeds)):
+        # a video's own note is seeded with it (same title), so notes don't make a search a fleet one
+        elif scope == "media" or (any(nodes[i]["kind"] in MEDIA_KINDS for i in seeds)
+                                  and all(nodes[i]["kind"] in MEDIA_KINDS + ("note",) for i in seeds)):
             # who watched it and what else they watched, but not every title Plex serves
             own = [e for e in edges if e["kind"] != "served_by"]
             keep = _around(seeds, own, DEPTH) | _around(seeds, edges, 1)
@@ -684,6 +707,9 @@ def build(q, expand=None, live=False, lens=None, videos=False):
                 found[nid]["label"] = titles[nid[2:]]
         for nid, n in found.items():
             out.setdefault(nid, dict(n, result=n.get("result", False)))
+            out[nid]["result"] = out[nid]["result"] or n.get("result", False)   # a search hit already pulled in as a neighbor
+        # a video already in the graph keeps the edge to its note when search brings that note in
+        out_edges += [e for e in edges if e["kind"] == "noted" and e["b"] in found and e["a"] in out and e["b"] not in keep]
         joins = joins or []
         for e in joins:
             if e["a"] not in out and len(out) >= CAP:
