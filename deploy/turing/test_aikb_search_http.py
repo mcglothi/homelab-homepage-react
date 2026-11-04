@@ -30,6 +30,24 @@ class APITests(unittest.TestCase):
         (self.root / ".private" / "hidden.md").write_text("secret")
         (self.root / "notes" / "plain.txt").write_text("not markdown")
         (self.root / "notes" / "escape.md").symlink_to("/tmp/outside.md")
+        (self.root / "_state.yaml").write_text("""last_updated: 2026-11-04T10:00:00Z
+ssl_certs:
+  - name: '*.home.timmcg.net'
+    npm_cert_id: 7
+    expires: 2026-11-08T00:00:00Z
+    warn_after: 21
+    file: notes/one.md
+open_incidents:
+  - item: Disk full
+    detail: turing needs attention
+pending:
+  - item: Review certificate
+    detail: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    blocked_by: waiting
+    priority: high
+    project: lab
+    file: .private/hidden.md
+""")
         tool = self.root / "_tools" / "aikb-search"
         tool.mkdir(parents=True)
         db = sqlite3.connect(tool / "aikb_index.db")
@@ -75,6 +93,14 @@ class APITests(unittest.TestCase):
     def test_healthz(self):
         status, body = self.request("/healthz")
         self.assertEqual((status, body["chunks"], body["root"]), (200, 3, str(self.root.resolve())))
+
+    def test_state_only_returns_safe_fields(self):
+        status, body = self.request("/state")
+        self.assertEqual(status, 200)
+        self.assertEqual(set(body), {"last_updated", "ssl_certs", "open_incidents", "pending"})
+        self.assertEqual(body["ssl_certs"][0]["file"], "notes/one.md")
+        self.assertEqual(body["pending"][0]["file"], None)
+        self.assertEqual(len(body["pending"][0]["detail"]), 400)
 
     def test_search_shape_entities_and_k_clamp(self):
         status, body = self.request("/search?q=alpha&k=99")
