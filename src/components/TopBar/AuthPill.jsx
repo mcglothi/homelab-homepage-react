@@ -7,7 +7,7 @@ import { C, alpha, glow, MONO } from '../../ui/theme'
 // location to copy.
 const COLOR = { ok: C.green, warn: C.amber, error: C.red }
 // Below this width the pill drops its label so the nav tabs keep their room
-const NARROW = '(max-width: 1279px)'
+const NARROW = '(max-width: 1100px)'
 
 async function copyText(text) {
   try {

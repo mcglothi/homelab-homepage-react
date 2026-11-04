@@ -48,6 +48,10 @@ def _collector(cid, name, fix, runs):
     interval = float(setting("COLLECT_MINUTES", "15")) * 60
     if interval and time.time() - r["at"] > STALE_RUNS * interval:
         return dict(out, state="warn", detail="last collected %s" % _ago(r["at"]))
+    if cid == "headscale":   # the tailnet at a glance (this used to be its own top-bar pill)
+        nodes = mirror.items("node")
+        up = sum(1 for n in nodes if n.get("online"))
+        return dict(out, state="ok", detail="%d/%d nodes online · %s" % (up, len(nodes), _ago(r["at"])))
     return dict(out, state="ok", detail="%d items · %s" % (r["count"], _ago(r["at"])))
 
 
