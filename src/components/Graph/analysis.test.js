@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { capGroups, rankGroup, recScore, decay, foldSummary, agoText, isDated, diversity, modularity } from './analysis.js'
+import { capGroups, rankGroup, recScore, decay, foldSummary, agoText, isDated, diversity, modularity, surprising, suggestions } from './analysis.js'
 
 const NOW = Date.parse('2026-11-04T12:00:00Z')
 const DAY = 86400000
@@ -116,4 +116,34 @@ test('diversity describes the current Louvain communities', () => {
   assert.ok(modularity(nodes, edges) > 0)
   assert.equal(diversity(nodes, edges).label, 'diversified')
   assert.equal(diversity([{ id: 'a', comm: 0 }, { id: 'b', comm: 0 }, { id: 'c', comm: 1 }], edges).label, 'biased')
+})
+
+test('surprising links are rare cross-community, cross-kind ties without hubs', () => {
+  const nodes = [
+    { id: 'hub', kind: 'host', comm: 0, bc: 99 }, { id: 'hub2', kind: 'host', comm: 0, bc: 98 }, { id: 'hub3', kind: 'host', comm: 1, bc: 97 },
+    { id: 'a', kind: 'host', comm: 0, bc: 1 }, { id: 'b', kind: 'app', comm: 1, bc: 1 },
+    { id: 'c', kind: 'dataset', comm: 0, bc: 1 }, { id: 'd', kind: 'app', comm: 1, bc: 1 }, { id: 'same', kind: 'host', comm: 0, bc: 1 },
+  ]
+  const edges = [{ a: 'hub', b: 'b', label: 'hub link' }, { a: 'a', b: 'b', label: 'common' }, { a: 'c', b: 'd', label: 'rare' }, { a: 'a', b: 'same', label: 'same topic' }]
+  assert.deepEqual(surprising(nodes, edges).map(x => x.label), ['rare', 'common'])
+  assert.equal(surprising(nodes, edges)[0].a, 'c')
+})
+
+test('suggestions lead with a community path, then hosts and concepts without repeating the query', () => {
+  const model = { lens: 'concepts', nodes: [
+    { id: 'a', label: 'Alpha', kind: 'host', comm: 0, bc: 4, deg: 5 }, { id: 'b', label: 'Beta', kind: 'host', comm: 1, bc: 3, deg: 4 },
+    { id: 'c', label: 'ZFS', kind: 'concept', comm: 0, bc: 1, count: 8 }, { id: 'd', label: 'Plex', kind: 'concept', comm: 1, bc: 1, count: 4 },
+  ] }
+  assert.deepEqual(suggestions(model, 'host:Alpha', 5), ['Alpha .. Beta', 'host:Beta', 'kb: ZFS', 'kb: Plex'])
+})
+
+test('fold placeholders never show up as surprising ties or suggestions', () => {
+  const nodes = [
+    { id: 'h', label: 'babbage', kind: 'host', comm: 0, bc: 0, deg: 9 }, { id: 'more:x', label: '+72 more', kind: 'app', comm: 1, bc: 9, deg: 1, fold: { total: 72 } },
+    { id: 'p', label: 'plex', kind: 'app', comm: 1, bc: 2, deg: 2 }, { id: 'q', label: 'Plex note', kind: 'note', comm: 0, bc: 0, deg: 1 },
+    { id: 'z1', label: 'z1', kind: 'host', comm: 2, bc: 50 }, { id: 'z2', label: 'z2', kind: 'host', comm: 2, bc: 49 }, { id: 'z3', label: 'z3', kind: 'host', comm: 2, bc: 48 },
+  ]
+  const edges = [{ a: 'h', b: 'more:x', label: 'folded' }, { a: 'p', b: 'q', label: 'mentions' }]
+  assert.deepEqual(surprising(nodes, edges).map(x => x.label), ['mentions'])
+  assert.ok(!suggestions({ nodes }, 'babbage').some(s => s.includes('more')))
 })

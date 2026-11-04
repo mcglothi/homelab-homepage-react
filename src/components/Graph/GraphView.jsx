@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom'
 import { C, MONO, alpha } from '../../ui/theme'
 import { Button, Pill } from '../../ui/primitives'
-import { KIND, FACETS, facetOf, initialOrder, weightOf, capGroups, localSubset, metrics, gapNodes, diversity, WINDOWS, DEFAULT_WINDOW, DEFAULT_HALF_LIFE, windowLabel } from './analysis'
+import { KIND, FACETS, facetOf, initialOrder, weightOf, capGroups, localSubset, metrics, gapNodes, diversity, surprising, suggestions, WINDOWS, DEFAULT_WINDOW, DEFAULT_HALF_LIFE, windowLabel } from './analysis'
 import { createEngine } from './engine'
 import { useGraphTheme } from './theme'
 import Explain from './Explain'
@@ -267,6 +267,10 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
     pendingSearch.current = text
     onSearch(text)
   }, [raw, onSearch, searchText, stamp])
+  const searchSuggested = useCallback(text => {
+    if (!onSearch) return
+    stamp(); pendingSearch.current = text; onSearch(text)
+  }, [onSearch, stamp])
   // "Isolate": a view filter on what is loaded. It adds a crumb; the rest of the graph is dimmed in place, so nothing moves.
   const isolate = useCallback(id => {
     const n = raw?.nodes.find(x => x.id === id)
@@ -330,7 +334,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
       edges = edges.filter(e => !hubs.has(e.a) && !hubs.has(e.b))
       ms = metrics(nodes, edges, S.size)
     }
-    return { nodes: ms, edges, gap: gapNodes(ms, edges), stats: base.stats }
+    return { nodes: ms, edges, lens: raw.lens, gap: gapNodes(ms, edges), stats: base.stats }
   }, [raw, S.cap, on, S.size, S.minLinks, S.hideHubs, sel, wOf, revealed, boost, S.window, S.halfLife])
   const byId = useMemo(() => new Map((model?.nodes ?? []).map(n => [n.id, n])), [model])
   // Isolate: the node and its neighborhood (depth from the Controls slider) stay lit; everything else is dimmed in place
@@ -761,6 +765,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
       <div style={{ color: theme.flag.conflict }}>── sources disagree (moving dots)</div>
       <div style={{ color: theme.flag.missing }}>- - expected link missing</div>
       <div style={{ color: theme.flag.inferred }}>- - inferred pair</div>
+      <div>Relation tags: inferred links were deduced; ambiguous links could not be uniquely resolved.</div>
       <H3>Arrows</H3>
       <div>{S.flow.on ? 'Moving pulses show the direction (parent to child, owner to asset) on the selected, compared, nearby and conflicting links; red = sources disagree. Those links get no static arrowhead.' : 'Pulses are off.'} {S.arrows === 'off' ? 'Static arrowheads: off.' : S.arrows === 'all' ? 'Static arrowheads are on every link without a pulse.' : 'Static arrowheads (smart): on links without a pulse, near the focus and when zoomed in.'}</div>
       <H3>Recency</H3>
@@ -833,7 +838,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
           <span style={{ color: flags.inferred ? theme.flag.inferred : C.dim }}>● {flags.inferred} inferred</span> · <span style={{ color: model.gap.size ? C.amber : C.dim }}>{model.gap.size} gap node{model.gap.size === 1 ? '' : 's'}</span>
         </div>
         <Explain summary={summary} />
-        <Insights model={model} select={select} color={S.color} theme={theme} />
+        <Insights model={model} select={select} color={S.color} theme={theme} onSearch={searchSuggested} search={rootEntry.q} />
       </>
     ),
     legend: legend,
@@ -961,7 +966,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
 const pillStyle = w => ({ ...glass, width: w, height: 28, padding: 0, justifyContent: 'center', display: 'inline-flex', alignItems: 'center', fontFamily: MONO, fontSize: 11, letterSpacing: 0.5, color: C.bright, cursor: 'pointer', opacity: 0.6, transition: 'opacity .15s' })
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
 
-function Insights({ model, select, color, theme }) {
+function Insights({ model, select, color, theme, onSearch, search }) {
   const ns = model.nodes
   const info = useMemo(() => {
     if (!ns.length) return null
@@ -983,8 +988,9 @@ function Insights({ model, select, color, theme }) {
     const orphans = hosts.filter(n => n.result && !owned.has(n.id))
     const nocmdb = hosts.filter(n => (n.attrs || []).some(a => a[0] === 'In CMDB' && a[1] !== 'yes'))
     const dups = hosts.filter(n => (n.attrs || []).some(a => a[0] === 'CMDB duplicates'))
-    return { top, cl, pairs, orphans, nocmdb, dups, gaps: hosts.filter(n => model.gap.has(n.id)).length, diversity: diversity(ns, model.edges) }
-  }, [ns, model])
+    return { byId, top, cl, pairs, orphans, nocmdb, dups, gaps: hosts.filter(n => model.gap.has(n.id)).length, diversity: diversity(ns, model.edges),
+      surprising: surprising(ns, model.edges), suggestions: suggestions(model, search) }
+  }, [ns, model, search])
   if (!info) return null
   const col = n => (color === 'comm' ? theme.comm[n.comm % theme.comm.length] : theme.kind[n.kind])
   const name = c => (c[1].filter(n => n.result).slice(0, 2).map(n => n.label).join(', ') || c[1][0].label) + (c[1].length > 2 ? ` +${c[1].length - 2}` : '')
@@ -1025,6 +1031,19 @@ function Insights({ model, select, color, theme }) {
             <Explain compact mode="bridge" gap={{ a: p[0][1].slice().sort((a, b) => b.bc - a.bc).slice(0, 6).map(n => n.label), b: p[1][1].slice().sort((a, b) => b.bc - a.bc).slice(0, 6).map(n => n.label) }} summary={() => ({ question: 'Find a bridge between these AIKB topics.' })} />
           </div>
         ))}
+      </>}
+      {info.surprising.length > 0 && <>
+        <div style={sub}>Surprising connections</div>
+        {info.surprising.map(x => {
+          const a = info.byId.get(x.a), b = info.byId.get(x.b)
+          return <a key={`${x.a}-${x.b}-${x.label}`} onClick={() => select(x.a)} style={{ ...row, color: C.text, textDecoration: 'none' }}>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a?.label} ↔ {b?.label} · {x.label}</span>
+          </a>
+        })}
+      </>}
+      {info.suggestions.length > 0 && <>
+        <div style={sub}>Try next</div>
+        {info.suggestions.map(value => <a key={value} onClick={() => onSearch?.(value)} style={{ ...row, color: C.accent, fontFamily: MONO, fontSize: 11, textDecoration: 'none' }}>{value}</a>)}
       </>}
       {info.gaps + info.orphans.length + info.nocmdb.length + info.dups.length > 0 && <>
         <div style={sub}>Diagnostics</div>

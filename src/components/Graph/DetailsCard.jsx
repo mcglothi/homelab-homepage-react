@@ -245,6 +245,7 @@ function Row({ r, select, onReveal, theme, onHoverNode }) {
       style={{ borderTop: `1px solid ${C.line}`, padding: '5px 0', fontSize: 12, display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap' }}>
       <span aria-hidden title={KIND[o.kind] ?? o.kind} style={{ color: theme.kind[o.kind], fontSize: 11, width: 12, textAlign: 'center' }}>{GLYPH[o.kind] || '●'}</span>
       <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.dim, textTransform: 'uppercase', letterSpacing: 0.5 }} title={up ? 'the link points to this node' : 'the link points away from this node'}>{text}</span>
+      {e.prov && e.prov !== 'extracted' && <span title={e.prov === 'ambiguous' ? 'Ambiguous: the source did not identify one unambiguous relation.' : 'Inferred: this relation was deduced from the available data.'} style={{ fontFamily: MONO, fontSize: 9, color: C.dim, border: `1px solid ${C.line}`, borderRadius: 4, padding: '0 3px' }}>{e.prov}</span>}
       <a onClick={() => (folded ? onReveal(o.id) : select(o.id))} title={folded ? 'Folded into a "+N more" group on screen: click to show it' : undefined} style={{ color: C.accent, cursor: 'pointer', minWidth: 0, wordBreak: 'break-word' }}>{o.label}</a>
       {folded && <span style={{ color: C.dim, fontSize: 10 }}>(folded)</span>}
       <span style={{ color: C.dim, fontSize: 11 }}>({e.flag === 'derived' ? 'joined by name or IP' : e.flag === 'inferred' ? 'inferred' : 'typed link'})</span>

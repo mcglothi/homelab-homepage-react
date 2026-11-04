@@ -14,6 +14,7 @@ const PivotGrid = lazy(() => import('../Graph/PivotGrid'))   // three.js stays o
 // `search` pivot the box to that term.
 const MONO = "'JetBrains Mono',monospace"
 const SOURCE = {
+  path: { label: 'Path', color: C.cyan },
   host: { label: 'Hosts', color: C.cyan },
   app: { label: 'Apps', color: C.blue },
   service: { label: 'Cards', color: C.muted },
@@ -30,6 +31,7 @@ const SOURCE = {
 // Result sections, in page order. Each card lands in the first section listing its
 // source; cards keep that order inside a section. Unknown sources go to Records.
 const SECTIONS = [
+  { key: 'path', label: 'Path', color: C.cyan, sources: ['path'] },
   { key: 'servers', label: 'Hosts', color: C.cyan, sources: ['host'] },
   { key: 'notes', label: 'Notes (AIKB)', color: C.violet, sources: ['aikb'] },
   { key: 'apps', label: 'Apps & services', color: C.blue, sources: ['app', 'service', 'proxy'] },
