@@ -108,6 +108,8 @@ const TIPS = [
     ['10.10.10.50', 'an IP: the host that answers on it, and what forwards to it'],
     ['plex  ·  nextcloud', 'an app: where it runs, what it mounts, which proxy names reach it'],
     ['plex .. vaultwarden', 'the shortest known paths between two things'],
+    ['affected:babbage', 'what in the fleet depends on it'],
+    ['changes:', 'what changed since the previous daily fleet snapshot'],
     ['anything else', 'free text across the mirror, Radarr, Sonarr, Plex history and the watch ledger'],
   ]],
   ['Scope: pick it in the dropdown, or type a prefix', [

@@ -15,6 +15,8 @@ const PivotGrid = lazy(() => import('../Graph/PivotGrid'))   // three.js stays o
 const MONO = "'JetBrains Mono',monospace"
 const SOURCE = {
   path: { label: 'Path', color: C.cyan },
+  affected: { label: 'Affected', color: C.red },
+  changes: { label: 'Changes', color: C.green },
   host: { label: 'Hosts', color: C.cyan },
   app: { label: 'Apps', color: C.blue },
   service: { label: 'Cards', color: C.muted },
@@ -33,6 +35,8 @@ const SOURCE = {
 // source; cards keep that order inside a section. Unknown sources go to Records.
 const SECTIONS = [
   { key: 'path', label: 'Path', color: C.cyan, sources: ['path'] },
+  { key: 'affected', label: 'Affected', color: C.red, sources: ['affected'] },
+  { key: 'changes', label: 'Changes', color: C.green, sources: ['changes'] },
   { key: 'servers', label: 'Hosts', color: C.cyan, sources: ['host'] },
   { key: 'notes', label: 'Notes (AIKB)', color: C.violet, sources: ['aikb'] },
   { key: 'ops', label: 'Ops', color: C.red, sources: ['ops'] },

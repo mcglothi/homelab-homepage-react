@@ -23,11 +23,14 @@ from collections import defaultdict, deque
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
+import os
 import re
 import threading
 from urllib.parse import quote, urlencode, urlsplit
 
 from . import fleet, routes, search
+from . import common
 from .common import Cached, fetch_local, parallel, request, settle
 
 CAP = 400      # nodes per graph; `truncated` says when it bites
@@ -35,6 +38,19 @@ DEPTH = 2      # hops from the start nodes
 NOTE_LOOKUPS = 6   # hosts/apps asked about per graph
 NOTES_EACH = 5     # notes per host/app
 NOTE_SEEDS = 8     # notes a text search starts from
+
+# Which end depends on the other. Add a new fleet dependency kind here once.
+# `monitor` (host -> scrape target) is left out: targets exist only on ?live=1 builds, so counts would jump.
+DEPENDS = {"member": "b", "runs": "b", "covers": "b",
+           "targets": "a", "net": "a", "named": "a"}
+# Not fleet things: they never go down, so they don't start a blast radius
+NOT_FLEET = {"note", "concept", "media", "viewer", "device", "title", "video", "channel", "query", "incident", "pending"}
+# Also kept out of the daily snapshot: targets are live-only, alerts fire and clear, certs merge AIKB /state
+# (gone when AIKB times out) and renew; any of them would show as fake changes
+SNAPSHOT_SKIP = NOT_FLEET | {"target", "alert", "cert"}
+_snapshot_lock = threading.Lock()
+SNAPSHOT_DAYS = 14
+_log = logging.getLogger(__name__)
 
 
 def _ops_alerts():
@@ -636,6 +652,167 @@ def _path_graph(q, F, nodes, edges):
             "resolved": None, "truncated": False, "coverage": {"list": 2, "covered": 2, "nodes": len(keep), "groups": []}, "warnings": warnings, "path": payload}
 
 
+def _affected_seed(text, nodes, warnings, dependents):
+    """A fleet-only path seed: an AIKB note cannot be a dependency outage.
+    Among same-name matches, one with dependents wins (the Vaultwarden dataset, not its dashboard card)."""
+    t = text.strip().lower()
+    fleet_nodes = {i: n for i, n in nodes.items() if n["kind"] not in NOT_FLEET}
+    matches = sorted(_seeds(text, fleet_nodes), key=lambda i: (nodes[i]["label"].lower() != t, not dependents[i],
+                                                                 END_ORDER.get(nodes[i]["kind"], 99)))
+    if not matches:
+        warnings.append("nothing in the fleet matches '%s'" % text)
+        return None
+    picked = matches[0]
+    if len(matches) > 1:
+        warnings.append("'%s' matches %s nodes; using %s (%s)" % (text, len(matches), nodes[picked]["label"], nodes[picked]["kind"]))
+    return picked
+
+
+def _affected_graph(q, nodes, edges):
+    name = search.parse_affected(q) or ""
+    warnings = []
+    # Reverse the dependency arrow: an outage travels from a dependency to its dependents.
+    dependents = defaultdict(list)
+    for e in edges:
+        end = DEPENDS.get(e["kind"])
+        if end == "b":
+            dependents[e["a"]].append((e["b"], e))
+        elif end == "a":
+            dependents[e["b"]].append((e["a"], e))
+    start = _affected_seed(name, nodes, warnings, dependents)
+    empty = {"q": q, "nodes": [], "edges": [], "seeds": [], "listed": [], "matched": 0, "resolved": None,
+             "truncated": False, "coverage": {"list": 0, "covered": 0, "nodes": 0, "groups": []}, "warnings": warnings,
+             "affected": {"from": start, "count": 0, "by_kind": {}, "hops": {}}}
+    if not start:
+        return empty
+    seen, hops, reached, queue = {start}, {}, {}, deque([(start, 0)])
+    while queue:
+        here, depth = queue.popleft()
+        if depth == 4:
+            continue
+        for other, edge in dependents[here]:
+            if other in seen:
+                continue
+            seen.add(other)
+            hop = depth + 1
+            hops[other], reached[other] = hop, (here, edge)
+            queue.append((other, hop))
+    first = [i for i in hops if hops[i] == 1]
+    ordered = sorted(hops, key=lambda i: (hops[i], nodes[i]["label"].lower(), i))
+    keep = {start, *first}   # never hide the immediate blast radius
+    keep.update([i for i in ordered if i not in keep][:max(0, CAP - len(keep))])
+    truncated = len(keep) < len(hops) + 1
+    by_kind = defaultdict(int)
+    for i in hops:
+        by_kind[nodes[i]["kind"]] += 1
+    out = [dict(nodes[start], result=True)]
+    for i in ordered:
+        if i not in keep:
+            continue
+        previous, edge = reached[i]
+        # Result rings and the seed reticle are existing graph language; hop carries the ordering and annotation.
+        out.append(dict(nodes[i], result=True, hop=hops[i], via=edge["label"], via_node=previous))
+    used = {(edge["a"], edge["b"], edge["kind"]) for i, (_, edge) in reached.items() if i in keep}
+    out_edges = [e for e in edges if (e["a"], e["b"], e["kind"]) in used]
+    return {"q": q, "nodes": out, "edges": out_edges, "seeds": [start], "listed": [start] + [i for i in ordered if i in keep],
+            "matched": len(hops) + 1, "resolved": nodes[start]["label"], "truncated": truncated,
+            "coverage": {"list": len(hops) + 1, "covered": len(keep), "nodes": len(keep), "groups": []}, "warnings": warnings,
+            "affected": {"from": start, "count": len(hops), "by_kind": dict(by_kind), "hops": hops}}
+
+
+def _snapshot_nodes_edges(nodes, edges):
+    """The daily history is infrastructure only; notes and media churn independently."""
+    keep = {i for i, n in nodes.items() if n["kind"] not in SNAPSHOT_SKIP}
+    return {"nodes": {i: [nodes[i]["kind"], nodes[i]["label"]] for i in sorted(keep)},
+            "edges": [list(e) for e in sorted({(e["a"], e["b"], e["kind"]) for e in edges if e["a"] in keep and e["b"] in keep})]}
+
+
+def _snapshot_dir():
+    return common.DATA_DIR / "graph-snapshots"
+
+
+def _today():
+    return datetime.now().date().isoformat()
+
+
+def _write_snapshot(nodes, edges, today=None):
+    """One atomic daily baseline; graph queries must still work on a read-only disk."""
+    today = today or _today()
+    folder, target = _snapshot_dir(), _snapshot_dir() / (today + ".json")
+    # right after start the mirror can still be empty; that must not become the day's baseline
+    if not any(n["kind"] == "host" for n in nodes.values()):
+        return
+    with _snapshot_lock:   # ThreadingHTTPServer: two first-of-the-day requests share one pid
+        _write_snapshot_locked(nodes, edges, folder, target)
+
+
+def _write_snapshot_locked(nodes, edges, folder, target):
+    try:
+        if not target.exists():
+            folder.mkdir(parents=True, exist_ok=True)
+            tmp = folder / ("." + target.name + ".%s.tmp" % os.getpid())
+            try:
+                with tmp.open("w") as f:
+                    json.dump(_snapshot_nodes_edges(nodes, edges), f, sort_keys=True)
+                os.replace(tmp, target)
+            finally:
+                if tmp.exists():
+                    tmp.unlink()
+        files = sorted(folder.glob("*.json"), reverse=True)
+        for old in files[SNAPSHOT_DAYS:]:
+            old.unlink()
+    except OSError as e:
+        _log.warning("graph snapshot: %s", e)
+
+
+def _previous_snapshot(today=None):
+    today = today or _today()
+    try:
+        files = sorted((p for p in _snapshot_dir().glob("*.json") if p.stem < today), reverse=True)
+        if not files:
+            return None, None
+        with files[0].open() as f:
+            return files[0].stem, json.load(f)
+    except (OSError, ValueError, TypeError) as e:
+        _log.warning("graph snapshot read: %s", e)
+        return None, None
+
+
+def _changes_graph(q, nodes, edges):
+    since, before = _previous_snapshot()
+    empty = {"q": q, "nodes": [], "edges": [], "seeds": [], "listed": [], "matched": 0, "resolved": None,
+             "truncated": False, "coverage": {"list": 0, "covered": 0, "nodes": 0, "groups": []}, "warnings": [],
+             "changes": {"since": since, "added": 0, "removed": 0, "edges_added": 0, "edges_removed": 0}}
+    if not before:
+        empty["warnings"].append("no earlier snapshot yet; check back tomorrow")
+        return empty
+    current = _snapshot_nodes_edges(nodes, edges)
+    old_nodes = before.get("nodes") or {}
+    old_edges = {tuple(e) for e in before.get("edges") or []}
+    cur_nodes, cur_edges = current["nodes"], {tuple(e) for e in current["edges"]}
+    added, removed = set(cur_nodes) - set(old_nodes), set(old_nodes) - set(cur_nodes)
+    edges_added, edges_removed = cur_edges - old_edges, old_edges - cur_edges
+    keep = set(added)
+    for a, b, _ in edges_added:   # a new link between two old nodes is a change too
+        keep.update((a, b))
+    for a, b, _ in edges_removed:
+        keep.update(i for i in (a, b) if i in cur_nodes)
+    out = [dict(nodes[i], change="added", change_since=since, result=True) for i in sorted(added)]
+    out += [dict(nodes[i], result=False) for i in sorted(keep - added) if i in nodes]
+    for i in sorted(removed):
+        kind, label = (list(old_nodes[i]) + [i, i])[:2]
+        out.append({"id": i, "kind": kind, "label": label, "sub": "gone since %s" % since, "attrs": [],
+                    "missing": True, "change": "removed", "change_since": since, "result": True})
+    out_ids = {n["id"] for n in out}
+    out_edges = [e for e in edges if e["a"] in out_ids and e["b"] in out_ids]
+    out_edges += [{"a": a, "b": b, "kind": kind, "label": "was %s" % kind, "flag": "missing", "via": "snapshot", "detail": "removed since %s" % since}
+                  for a, b, kind in sorted(edges_removed) if a in out_ids and b in out_ids]
+    empty.update({"nodes": out, "edges": out_edges, "seeds": [n["id"] for n in out if n.get("change")], "listed": [n["id"] for n in out],
+                  "matched": len(added) + len(removed), "coverage": {"list": len(added) + len(removed), "covered": len(out), "nodes": len(out), "groups": []},
+                  "changes": {"since": since, "added": len(added), "removed": len(removed), "edges_added": len(edges_added), "edges_removed": len(edges_removed)}})
+    return empty
+
+
 def build(q, expand=None, live=False, lens=None, videos=False):
     F = fleet.get()
     if lens == "concepts":
@@ -643,15 +820,26 @@ def build(q, expand=None, live=False, lens=None, videos=False):
     warnings = []
     _media_state.warning = False
     nodes, edges = _all(F, live=live)
+    _write_snapshot(nodes, edges)
     if getattr(_media_state, "warning", False):
         warnings.append("Tautulli is unavailable, so media activity is left out")
     edges = _with_provenance(edges)
     if not expand and search.parse_path(q):
         return _path_graph(q, F, nodes, edges)
+    if not expand and search.parse_affected(q):
+        return _affected_graph(q, nodes, edges)
+    if not expand and search.parse_changes(q):
+        data = _changes_graph(q, nodes, edges)
+        data["edges"] = _with_provenance(data["edges"])
+        return data
     everything = not expand and q.strip() in ("*", "all")
     # host:/app:/media:/kb:/ops: prefixes as the search bar has them; kb: starts from notes only
     scope, text = search.parse_scope(q)
     notes_only = scope == "aikb"
+    # a node removed since the snapshot (`changes:`) has nothing around it now; notes join further down
+    if expand and expand not in nodes and not expand.startswith("n:"):
+        return {"q": q, "nodes": [], "edges": [], "seeds": [], "listed": [], "matched": 0, "resolved": None, "truncated": False,
+                "coverage": {"list": 0, "covered": 0, "nodes": 0, "groups": []}, "warnings": ["%s is no longer in the fleet" % expand]}
     if expand:
         keep = _around([expand], edges, 1) if expand in nodes else set()
         seeds = [expand]

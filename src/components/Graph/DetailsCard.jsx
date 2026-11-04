@@ -138,6 +138,7 @@ export default function DetailsCard({ node, model, raw, rawById, byId, select, t
       <div style={{ fontSize: 10.5, color: kindColor, fontFamily: MONO, marginTop: 8 }}>{KIND[node.kind] ?? node.kind}{node.more ? ' · collapsed' : ''}</div>
       <div style={{ fontSize: 15, fontWeight: 600, wordBreak: 'break-word', color: C.bright }}>{node.label}</div>
       <div style={{ fontSize: 11.5, color: C.muted }}>{node.sub}</div>
+      {node.change && <div style={{ fontSize: 11.5, marginTop: 4, color: node.change === 'removed' ? C.amber : C.green }}>{node.change === 'removed' ? 'Removed' : 'Added'} since {node.change_since}</div>}
       {pinned && <div style={{ fontSize: 11.5, marginTop: 4, color: C.accent }}>● pinned where you dropped it <a onClick={onUnpin} style={{ cursor: 'pointer', textDecoration: 'underline' }}>unpin</a></div>}
       {info && info.total > info.shown && <div style={{ fontSize: 11, color: C.amber, marginTop: 4 }}>Showing {info.shown} of {info.total} children. “Search for this” lists them from this node.</div>}
       {facts.length > 0 && (
