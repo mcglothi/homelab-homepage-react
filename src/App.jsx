@@ -9,7 +9,9 @@ import { Sidebar } from './components/Sidebar/Sidebar'
 import { SERVICES } from './services'
 import { fetchAllData } from './api/index.js'
 import { useLocation } from './router'
-import { ThemeContext } from './ui/theme'
+import { ThemeContext, C, alpha, DENSITY } from './ui/theme'
+import { AppearanceDrawer } from './components/Appearance/AppearanceDrawer'
+import { useAppearance } from './hooks/useAppearance'
 import { Toaster } from './ui/primitives'
 import { Nav } from './components/TopBar/Nav'
 import AikbView from './views/Aikb/AikbView'
@@ -21,26 +23,6 @@ import { ViewShell } from './views/bits'
 const VIEWS = { '/aikb': AikbView, '/usage': UsageView, '/watch': WatchView, '/ha': HaView }
 const TITLES = { '/': 'Docket', '/aikb': 'AIKB · Docket', '/usage': 'AI Usage · Docket', '/watch': 'Watch · Docket', '/ha': 'HA · Docket' }
 
-const ACCENT_DEFAULT = '#ff2d6b'
-const BG_DEFAULT = '#080808'
-
-const ACCENT_PRESETS = [
-  { color: '#ff2d6b', label: 'Pink' },
-  { color: '#00fff7', label: 'Cyan' },
-  { color: '#bf5fff', label: 'Violet' },
-  { color: '#39ff5a', label: 'Green' },
-  { color: '#2979ff', label: 'Blue' },
-  { color: '#ffab00', label: 'Amber' },
-  { color: '#ff6b35', label: 'Orange' },
-]
-
-const BG_PRESETS = [
-  { color: '#080808', label: 'Black' },
-  { color: '#060d1a', label: 'Navy' },
-  { color: '#0c0814', label: 'Purple' },
-  { color: '#0e0e0e', label: 'Charcoal' },
-  { color: '#061414', label: 'Teal' },
-]
 
 // Map live API data to per-service detail overrides, plus each card's probe result
 function buildServiceData(apiData) {
@@ -85,23 +67,13 @@ export default function App() {
   // "Search for this" in the graph: a real search, and the page stays in Graph view along the chain of such searches
   const graphSearch = text => { chain.current.add(search.q); chain.current.add(text); setQuery(text) }
   const matches = matchCount(search)
-  const [tweaksOpen, setTweaksOpen] = useState(false)
+  const [appearanceOpen, setAppearanceOpen] = useState(false)
 
-  // Persisted preferences
-  const [accent, setAccent] = useState(() => localStorage.getItem('accent') ?? ACCENT_DEFAULT)
-  const [bg, setBg] = useState(() => localStorage.getItem('bg') ?? BG_DEFAULT)
-  const [cardRadius, setCardRadius] = useState(() => parseInt(localStorage.getItem('cardRadius') ?? '12'))
-  const [dotGrid, setDotGrid] = useState(() => localStorage.getItem('dotGrid') !== 'false')
-  const [glowIntensity, setGlowIntensity] = useState(() => parseFloat(localStorage.getItem('glowIntensity') ?? '1'))
-
-  useEffect(() => { localStorage.setItem('accent', accent) }, [accent])
-  useEffect(() => { localStorage.setItem('bg', bg) }, [bg])
-  useEffect(() => { localStorage.setItem('cardRadius', cardRadius) }, [cardRadius])
-  useEffect(() => { localStorage.setItem('dotGrid', dotGrid) }, [dotGrid])
-  useEffect(() => { localStorage.setItem('glowIntensity', glowIntensity) }, [glowIntensity])
-
-  // Apply bg to body
-  useEffect(() => { document.body.style.background = bg }, [bg])
+  // Theme, mode, accent, radius, texture: saved on the server (/api/appearance), so they follow you to any browser
+  const appearance = useAppearance()
+  const accent = C.accent
+  const cardRadius = appearance.settings.radius
+  const sp = n => Math.round(n * (DENSITY[appearance.settings.density] ?? 1))
   useEffect(() => { document.title = TITLES[path] ?? 'Docket' }, [path])
 
   // Live API data
@@ -152,21 +124,9 @@ export default function App() {
   }
 
   return (
-    <ThemeContext.Provider value={{ accent, cardRadius, isMobile }}>
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: bg }}>
-      {/* Bottom-right bloom */}
-      <div style={{
-        position: 'fixed', bottom: -180, right: -180, width: 600, height: 600, borderRadius: '50%',
-        background: `radial-gradient(circle, ${accent}07 0%, transparent 70%)`,
-        pointerEvents: 'none', zIndex: 0,
-      }} />
-      {/* Top-left bloom */}
-      <div style={{
-        position: 'fixed', top: -200, left: -200, width: 700, height: 700, borderRadius: '50%',
-        background: `radial-gradient(circle, ${accent}08 0%, transparent 70%)`,
-        pointerEvents: 'none', zIndex: 0,
-      }} />
-
+    <ThemeContext.Provider value={{ accent, cardRadius, isMobile, isTablet, sp }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <AppearanceDrawer open={appearanceOpen} onClose={() => setAppearanceOpen(false)} appearance={appearance} />
       <TopBar
         accent={accent}
         isMobile={isMobile}
@@ -193,89 +153,16 @@ export default function App() {
                 accent={accent} view={search.q ? view : null} setView={pickView} />
             </div>
             <button
-              onClick={() => setTweaksOpen(o => !o)}
+              onClick={() => setAppearanceOpen(true)}
               title="Appearance"
               style={{
-                background: tweaksOpen ? `${accent}18` : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${tweaksOpen ? accent + '50' : '#ffffff10'}`,
-                borderRadius: 10, color: tweaksOpen ? accent : '#555',
+                background: appearanceOpen ? alpha(accent, '18') : alpha(C.text, '0a'),
+                border: `1px solid ${appearanceOpen ? alpha(accent, '50') : C.line}`,
+                borderRadius: 10, color: appearanceOpen ? accent : C.dim,
                 cursor: 'pointer', width: 42, height: 42, fontSize: 16, flexShrink: 0,
               }}
             >⚙</button>
           </div>
-
-          {/* Tweaks panel */}
-          {tweaksOpen && (
-            <div style={{
-              background: 'rgba(255,255,255,0.03)', border: `1px solid ${accent}30`,
-              borderRadius: 12, padding: '16px 20px', marginBottom: 24,
-            }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
-                {/* Accent */}
-                <div>
-                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', letterSpacing: 1, marginBottom: 8 }}>ACCENT</div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {ACCENT_PRESETS.map(p => (
-                      <button
-                        key={p.color}
-                        onClick={() => setAccent(p.color)}
-                        title={p.label}
-                        style={{
-                          width: 22, height: 22, borderRadius: '50%', background: p.color, border: 'none',
-                          cursor: 'pointer', outline: accent === p.color ? `2px solid ${p.color}` : 'none',
-                          outlineOffset: 2, boxShadow: accent === p.color ? `0 0 8px ${p.color}` : 'none',
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-                {/* Background */}
-                <div>
-                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', letterSpacing: 1, marginBottom: 8 }}>BACKGROUND</div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {BG_PRESETS.map(p => (
-                      <button
-                        key={p.color}
-                        onClick={() => setBg(p.color)}
-                        title={p.label}
-                        style={{
-                          width: 22, height: 22, borderRadius: '50%', background: p.color,
-                          border: `1px solid ${bg === p.color ? '#fff' : '#333'}`,
-                          cursor: 'pointer', outline: bg === p.color ? '2px solid #ffffff60' : 'none',
-                          outlineOffset: 2,
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-                {/* Card radius */}
-                <div>
-                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', letterSpacing: 1, marginBottom: 8 }}>
-                    RADIUS: {cardRadius}px
-                  </div>
-                  <input
-                    type="range" min={0} max={24} value={cardRadius}
-                    onChange={e => setCardRadius(parseInt(e.target.value))}
-                    style={{ width: 100, accentColor: accent }}
-                  />
-                </div>
-                {/* Dot grid toggle */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', letterSpacing: 1 }}>DOT GRID</div>
-                  <button
-                    onClick={() => setDotGrid(v => !v)}
-                    style={{
-                      fontFamily: "'JetBrains Mono',monospace", fontSize: 10,
-                      background: dotGrid ? `${accent}20` : 'transparent',
-                      border: `1px solid ${dotGrid ? accent : '#333'}`,
-                      color: dotGrid ? accent : '#555',
-                      borderRadius: 6, padding: '4px 12px', cursor: 'pointer',
-                    }}
-                  >{dotGrid ? 'on' : 'off'}</button>
-                </div>
-              </div>
-            </div>
-          )}
 
           <UniversalResults search={search} setQuery={setQuery} accent={accent} view={view} pickView={pickView} graphSearch={graphSearch} />
 
@@ -293,7 +180,7 @@ export default function App() {
                 ))}
               </div>
               {filtered.length === 0 && (
-                <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: '#444', marginTop: 40, textAlign: 'center' }}>
+                <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: C.faint, marginTop: 40, textAlign: 'center' }}>
                   no services matching "{query}"
                 </div>
               )}
@@ -329,12 +216,12 @@ export default function App() {
             />
             <div style={{
               position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 50,
-              background: '#0d0d0d', borderTop: '1px solid #ffffff14',
+              background: C.panel, borderTop: `1px solid ${C.line}`,
               borderRadius: '20px 20px 0 0', padding: '8px 0 0',
               maxHeight: '82vh', overflowY: 'auto',
             }}>
               <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 12 }}>
-                <div style={{ width: 36, height: 4, borderRadius: 2, background: '#333' }} />
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: C.line2 }} />
               </div>
               <div style={{ padding: '0 16px 24px', width: '100%' }}>
                 <Sidebar accent={accent} apiData={sidebarData} />

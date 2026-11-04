@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { C, alpha } from '../../ui/theme'
 
 const LINKS = [
   { label: 'timmcg.net', href: 'https://timmcg.net' },
@@ -24,10 +25,10 @@ export function QuickLinks({ accent }) {
             onMouseLeave={() => setHovered(null)}
             style={{
               fontFamily: "'JetBrains Mono',monospace", fontSize: 12,
-              color: hovered === l.label ? '#ccc' : '#666',
+              color: hovered === l.label ? C.body : C.muted,
               padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
-              border: `1px solid ${hovered === l.label ? '#ffffff15' : 'transparent'}`,
-              background: hovered === l.label ? 'rgba(255,255,255,0.03)' : 'transparent',
+              border: `1px solid ${hovered === l.label ? alpha(C.text, '15') : 'transparent'}`,
+              background: hovered === l.label ? alpha(C.text, 0.03) : 'transparent',
               textDecoration: 'none', transition: 'all 0.15s', display: 'block',
             }}
           >

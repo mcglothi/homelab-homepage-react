@@ -1,4 +1,5 @@
 import { TopBarPill } from '../shared/TopBarPill'
+import { C, alpha } from '../../ui/theme'
 
 export function DownloadTicker({ data }) {
   const speed = data?.speed || 0
@@ -6,8 +7,8 @@ export function DownloadTicker({ data }) {
 
   return (
     <TopBarPill
-      color={active ? '#f5c51840' : '#ffffff10'}
-      textColor={active ? '#f5c518' : '#444'}
+      color={active ? '#f5c51840' : alpha(C.text, '10')}
+      textColor={active ? '#f5c518' : C.faint}
       glow={active}
     >
       <span style={{ fontSize: 10 }}>↓</span>

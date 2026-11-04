@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Sparkline } from '../shared/Sparkline'
+import { C, alpha } from '../../ui/theme'
 
 export function GrafanaWidget({ accent, data }) {
   const [tick, setTick] = useState(0)
@@ -18,21 +19,21 @@ export function GrafanaWidget({ accent, data }) {
 
   const rows = [
     { label: 'CPU', val: `${cpuLive}%`, color: accent, data: cpuHistory },
-    { label: 'RAM', val: `${ramLive}%`, color: '#bf5fff', data: ramHistory },
-    { label: 'NET ↑↓', val: `${netLive} MB/s`, color: '#00bfff', data: netHistory },
+    { label: 'RAM', val: `${ramLive}%`, color: C.violet, data: ramHistory },
+    { label: 'NET ↑↓', val: `${netLive} MB/s`, color: C.blue, data: netHistory },
   ]
 
   return (
-    <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid #ffffff10', borderRadius: 12, padding: '14px 16px' }}>
+    <div style={{ background: alpha(C.text, 0.03), border: `1px solid ${alpha(C.text, '10')}`, borderRadius: 12, padding: '14px 16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: '#f46800', letterSpacing: 3, textTransform: 'uppercase' }}>Grafana</div>
-        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#333' }}>babbage</div>
+        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: C.faint }}>babbage</div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {rows.map(row => (
           <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ width: 56, flexShrink: 0 }}>
-              <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: '#444', letterSpacing: 1 }}>{row.label}</div>
+              <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: C.faint, letterSpacing: 1 }}>{row.label}</div>
               <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, fontWeight: 600, color: row.color, transition: 'color 0.5s' }}>{row.val}</div>
             </div>
             <Sparkline data={row.data} color={row.color} width={172} height={28} />

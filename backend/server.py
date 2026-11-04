@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from homeapi import graph, mirror, routes, search  # noqa: E402
+from homeapi import appearance, graph, mirror, routes, search  # noqa: E402
 from homeapi.common import REPO, request, setting  # noqa: E402
 
 DIST = REPO / "dist"
@@ -47,6 +47,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_json(self, payload, status=HTTPStatus.OK):
         self._send(status, json.dumps(payload).encode(), "application/json; charset=utf-8")
+
+    def _status(self, status, payload):
+        self._send_json(payload, HTTPStatus(status))
+
+    def _same_origin(self):
+        """A write must come from this site's own pages: no Origin header (curl), or one
+        whose host is the Host this request was sent to (www.home… behind NPM, or localhost)."""
+        origin = self.headers.get("Origin")
+        return not origin or urlsplit(origin).netloc == (self.headers.get("Host") or "")
 
     def _query(self):
         return {k: v[-1] for k, v in parse_qs(urlsplit(self.path).query).items()}
@@ -122,16 +131,31 @@ class Handler(BaseHTTPRequestHandler):
                 return self._search_stream(q.get("q"), q.get("scope"))
             if path == "/api/search":
                 return self._api(lambda: search.search(q.get("q"), q.get("mode", "fast"), q.get("scope")))
+            if path == "/api/appearance":
+                return self._send_json(appearance.get())
+            if path == "/api/themes":
+                return self._send_json(appearance.themes())
+            if path == "/api/themes/gallery":
+                return self._status(*appearance.gallery(q.get("refresh") == "1"))
             if path == "/api/graph":
                 return self._api(lambda: graph.build(q.get("q") or "", expand=q.get("expand") or None, live=q.get("live") == "1"))
             if path.startswith("/api/"):
                 return self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return self._static(path)
+        if self.command in ("POST", "DELETE") and not self._same_origin():
+            return self._send_json({"error": "cross-origin request refused"}, HTTPStatus.FORBIDDEN)
         if self.command == "POST" and path in routes.POST:
             return self._api(routes.POST[path])
+        if self.command == "POST" and path in ("/api/appearance", "/api/themes/install"):
+            body = self._body()
+            if body is None:
+                return self._send_json({"error": "body is not JSON"}, HTTPStatus.BAD_REQUEST)
+            return self._status(*(appearance.post(body) if path == "/api/appearance" else appearance.install(body)))
+        if self.command == "DELETE" and path.startswith("/api/themes/") and path.count("/") == 3:
+            return self._status(*appearance.uninstall(path.rsplit("/", 1)[1]))
         self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
-    do_GET = do_POST = do_HEAD = _route
+    do_GET = do_POST = do_HEAD = do_DELETE = _route
 
 
 def _collect_loop():
