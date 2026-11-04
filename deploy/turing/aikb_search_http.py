@@ -219,9 +219,13 @@ class App:
                           if tuple(sorted((a, b))) in allow and not (chunks > 200 and w < 2)]}
 
     def context(self, name, query, limit):
-        files = self._search_files(query, max(limit, 8)) if query.strip() else []
+        # The graph's search as typed: drop a scope prefix (kb:, host:) and treat * / all as every note
+        query = re.sub(r"^\s*(aikb|kb|notes|hosts?|h|apps?|media|m)\s*:", "", query or "", flags=re.I).strip()
+        if query.lower() in ("*", "all"):
+            query = ""
+        files = self._search_files(query, max(limit, 8)) if query else []
         clause, values = self._note_where("c"), [name]
-        if query.strip() and not files:
+        if query and not files:
             return {"name": name, "items": []}
         if files:
             clause += " AND c.file_path IN (%s)" % ",".join("?" * len(files))
@@ -230,7 +234,7 @@ class App:
             rows = conn.execute("""SELECT c.file_path, c.section, c.content
                                  FROM chunks c JOIN entity_chunks ec ON ec.chunk_id=c.id JOIN entities e ON e.id=ec.entity_id
                                  WHERE lower(e.name)=lower(?) AND e.kind IN ('tag', 'host', 'file') AND lower(e.name) NOT IN ('readme', 'index', '_index', 'changelog', 'todo', 'license') AND %s
-                                 GROUP BY c.id ORDER BY c.mtime DESC LIMIT ?""" % clause, values + [limit]).fetchall()
+                                 GROUP BY c.file_path ORDER BY c.mtime DESC LIMIT ?""" % clause, values + [limit]).fetchall()
         needle = name.lower()
         def excerpt(content):
             at = content.lower().find(needle)
@@ -282,9 +286,14 @@ class App:
             scored.append((score, path, [names[i] for i in sorted(names, key=idf, reverse=True)]))
         scored.sort(key=lambda r: (-r[0], r[1]))
         def linked(text, other):
-            choices = [other.lower(), Path(other).name.lower(), Path(other).stem.lower()]
-            destinations = re.findall(r"\]\(([^)]*)\)|\[\[([^]]*)\]\]", text.lower())
-            return any(token and any(token in d for d in pair) for pair in destinations for token in choices)
+            # Whole names only: "nas" must not match a link to truenas.md
+            choices = {other.lower(), Path(other).name.lower(), Path(other).stem.lower()}
+            for pair in re.findall(r"\]\(([^)]*)\)|\[\[([^]]*)\]\]", text.lower()):
+                for d in pair:
+                    d = re.split(r"[#|]", d.strip(), 1)[0].strip()
+                    if d and (d in choices or any(d.endswith("/" + t) for t in choices)):
+                        return True
+            return False
         items = []
         for score, path, names in scored[:limit]:
             try:

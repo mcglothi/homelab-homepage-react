@@ -217,7 +217,7 @@ def _concept_graph(q, expand, F, videos=False):
             node["attrs"].append(["Also in the fleet", name])
         nodes.append(node)
         by_name[name.lower()] = node
-    words = set(re.findall(r"[\w-]{3,}", text.lower()))
+    words = set() if text.strip().lower() in ("*", "all") else set(re.findall(r"[\w-]{3,}", text.lower()))
     seeds = [n["id"] for n in nodes if any(word in n["label"].lower() for word in words)]
     if not seeds:
         counts = {str(x.get("name", "")).lower(): x.get("count", 0) for x in got.get("concepts") or []}
@@ -340,7 +340,8 @@ def _explain_text(summary):
         section("Other links in common", compare.get("other_common_links"))
     selected = summary.get("selection")
     if selected:
-        section("SELECTION: %s: %s" % (selected.get("name"), selected.get("about") or ""), selected.get("attributes"))
+        out.append("SELECTION: %s: %s" % (selected.get("name"), selected.get("about") or ""))
+        section("Its attributes", selected.get("attributes"))
         section("Its relationships", selected.get("links"))
     section("RELATIONSHIPS", summary.get("relationships"))
     section("NEEDS ATTENTION (flagged in the data)", summary.get("needs_attention"))
@@ -373,8 +374,9 @@ def explain(body):
         response = request(routes.cfg("LLM_URL", "http://hopper:8012/v1/chat/completions"), method="POST", body=payload, timeout=150)
         data = response.json
         if response.status >= 400:
-            raise RuntimeError((data or {}).get("error", {}).get("message") if isinstance(data, dict) else "model request failed")
-        answer = (((data or {}).get("choices") or [{}])[0].get("message") or {}).get("content", "").strip()
+            err = data.get("error") if isinstance(data, dict) else None
+            raise RuntimeError((err.get("message") if isinstance(err, dict) else err) or "model request failed (HTTP %s)" % response.status)
+        answer = (((((data or {}).get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or "").strip()
     except Exception as exc:  # noqa: BLE001 - surfaced in the Explain panel
         return 502, {"error": str(exc) or type(exc).__name__}
     if not answer:

@@ -311,8 +311,8 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
   }, [raw, sel, seeds])
   const model = useMemo(() => {
     if (!raw) return null
-    // Concepts are one kind, so the per-kind cap would fold nearly all of them; the facade already sends the top 60
-    const base = capGroups(raw, raw?.lens === 'concepts' ? Math.max(S.cap, 80) : S.cap, wOf, revealed, boost, { windowDays: S.window, halfLife: S.halfLife })
+    // Concepts are one kind (weighted low as 'found'), so any per-kind cap folds most of them; the facade already caps at 60
+    const base = capGroups(raw, raw?.lens === 'concepts' ? Infinity : S.cap, wOf, revealed, boost, { windowDays: S.window, halfLife: S.halfLife })
     let nodes = base.nodes.filter(n => n.result || on(n.kind))
     const ids = new Set(nodes.map(n => n.id))
     let edges = base.edges.filter(e => ids.has(e.a) && ids.has(e.b))
@@ -1018,8 +1018,8 @@ function Insights({ model, select, color, theme }) {
       ))}
       {info.pairs.length > 0 && <>
         <div style={sub}>Weakest ties between communities</div>
-        {info.pairs.slice(0, 2).map((p, i) => (
-          <div key={i} style={{ ...row, cursor: 'default', flexWrap: 'wrap' }}>
+        {info.pairs.slice(0, 2).map(p => (
+          <div key={p[0][0] + '-' + p[1][0]} style={{ ...row, cursor: 'default', flexWrap: 'wrap' }}>
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name(p[0])} ↔ {name(p[1])}</span>
             <span style={{ color: C.dim, fontSize: 11 }}>{p[2]} link{p[2] === 1 ? '' : 's'}</span>
             <Explain compact mode="bridge" gap={{ a: p[0][1].slice().sort((a, b) => b.bc - a.bc).slice(0, 6).map(n => n.label), b: p[1][1].slice().sort((a, b) => b.bc - a.bc).slice(0, 6).map(n => n.label) }} summary={() => ({ question: 'Find a bridge between these AIKB topics.' })} />

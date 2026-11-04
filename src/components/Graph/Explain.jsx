@@ -6,19 +6,27 @@ import { Button } from '../../ui/primitives'
 export default function Explain({ summary, mode = 'graph', gap, compact = false }) {
   const [st, setSt] = useState({ busy: false, text: null, error: null })
   const ctl = useRef(null)
+  // A new graph or another pair: drop the old answer (and its request) rather than show it against the wrong thing
+  const inputs = mode + JSON.stringify(gap ?? null)
+  // (Bridge's summary is an inline function, new every render: its gap alone says what it is about)
+  const about = mode === 'bridge' ? null : summary
+  useEffect(() => { ctl.current?.abort(); ctl.current = null; setSt({ busy: false, text: null, error: null }) }, [inputs, about])
   useEffect(() => () => ctl.current?.abort(), [])
   const run = async () => {
     ctl.current?.abort()
     const c = new AbortController(); ctl.current = c
-    const timer = setTimeout(() => c.abort(), 170000)
+    let timedOut = false
+    const timer = setTimeout(() => { timedOut = true; c.abort() }, 170000)
     setSt({ busy: true, text: null, error: null })
     try {
       const r = await fetch('/api/graph/explain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: c.signal,
         body: JSON.stringify({ summary: summary(), mode, gap }) })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`)
-      setSt({ busy: false, text: j.text, error: null, basis: j.basis })
-    } catch (e) { setSt({ busy: false, text: null, error: e.name === 'AbortError' ? 'no answer within 170 s' : e.message }) } finally { clearTimeout(timer) }
+      if (ctl.current === c) setSt({ busy: false, text: j.text, error: null, basis: j.basis })
+    } catch (e) {
+      if (ctl.current === c) setSt({ busy: false, text: null, error: timedOut ? 'no answer within 170 s' : e.message })
+    } finally { clearTimeout(timer) }
   }
   return <div style={compact ? { marginTop: 4 } : undefined}>
     {!compact && <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', color: C.dim, margin: '14px 0 6px' }}>Explain</div>}
