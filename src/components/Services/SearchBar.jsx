@@ -9,7 +9,7 @@ const SCOPES = [
   ['all', 'Everything', 'Search every source: hosts, apps, proxy names, DNS, datasets, movies, TV, watched videos. The default.', 'Search everything — hosts, apps, IPs, proxy names, datasets, movies…   ( / )'],
   ['hosts', 'Hosts', 'Machines by name or IP: TrueNAS, VMs, AdGuard DNS names, Prometheus targets and alerts. Prefix: host:', 'Hostname or IP…  e.g. babbage, turing, 10.10.10.50'],
   ['apps', 'Apps', 'TrueNAS apps, dashboard cards, proxy names and the datasets they mount. Prefix: app:', 'App, proxy name or dataset…  e.g. plex, nextcloud, Media'],
-  ['media', 'Media', 'Movies (Radarr), TV (Sonarr) and the watch ledger. Prefix: media:', 'A title…  e.g. Obsession'],
+  ['media', 'Media', 'Movies (Radarr), TV (Sonarr), Plex history and the watch ledger. Prefix: media:', 'A title or viewer…  e.g. Severance'],
   ['aikb', 'Notes', 'The AIKB knowledge base: markdown notes, runbooks, decisions. Prefix: kb: or aikb:', 'Search notes…  e.g. zfs scrub, vaultwarden, plex transcode'],
   ['ops', 'Ops', 'Firing alerts, expiring certificates, AIKB incidents and pending work. Prefix: ops: or alerts:', 'Search alerts, certificates and incidents…'],
 ]
@@ -108,12 +108,12 @@ const TIPS = [
     ['10.10.10.50', 'an IP: the host that answers on it, and what forwards to it'],
     ['plex  ·  nextcloud', 'an app: where it runs, what it mounts, which proxy names reach it'],
     ['plex .. vaultwarden', 'the shortest known paths between two things'],
-    ['anything else', 'free text across the mirror, Radarr, Sonarr and the watch ledger'],
+    ['anything else', 'free text across the mirror, Radarr, Sonarr, Plex history and the watch ledger'],
   ]],
   ['Scope: pick it in the dropdown, or type a prefix', [
     ['host:turing', 'hosts only'],
     ['app:media', 'apps, cards, proxy names and datasets'],
-    ['media:obsession', 'movies, TV and watched videos'],
+    ['media:severance', 'movies, TV, Plex history and watched videos'],
   ]],
   ['Getting around', [
     ['/  ·  Esc', 'jump to the search box · clear it'],

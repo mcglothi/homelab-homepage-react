@@ -14,7 +14,7 @@ Groups: {source, title, items: [{title, subtitle, detail?, href?, search?, statu
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import fleet, routes
@@ -25,7 +25,7 @@ SCOPE_PREFIX = re.compile(r"^(host|hosts|h|app|apps|media|m|aikb|kb|notes|ops|al
 SCOPE_OF = {"host": "hosts", "hosts": "hosts", "h": "hosts", "app": "apps", "apps": "apps", "media": "media", "m": "media", "aikb": "aikb", "kb": "aikb", "notes": "aikb", "ops": "ops", "alerts": "ops"}
 SCOPE_TAGS = {"hosts": {"host", "dns", "network", "vm", "servers"}, "apps": {"app", "service", "proxy", "dataset"},
               "media": {"media", "watch"}, "aikb": {"aikb"}, "ops": set()}
-SCOPE_SOURCES = {"hosts": {"Prometheus"}, "apps": {"Prometheus"}, "media": {"Radarr", "Sonarr", "Watch"}, "aikb": {"AIKB"}, "ops": {"Ops"}}
+SCOPE_SOURCES = {"hosts": {"Prometheus"}, "apps": {"Prometheus"}, "media": {"Radarr", "Sonarr", "Watch", "Tautulli"}, "aikb": {"AIKB"}, "ops": {"Ops"}}
 
 
 def parse_path(q):
@@ -225,6 +225,81 @@ _movies = Cached(300, lambda: fetch_local("%s/api/v3/movie?apikey=%s" % (routes.
 _series = Cached(300, lambda: fetch_local("%s/api/v3/series?apikey=%s" % (routes.SONARR_URL(), routes.cfg("SONARR_KEY", "")), timeout=20) or [])
 
 
+def _tautulli_history():
+    if not routes.cfg("TAUTULLI_KEY", ""):
+        return None
+    after = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
+    data = routes.tautulli("get_history&length=1000&after=" + after)()
+    rows = ((data or {}).get("response") or {}).get("data") or {}
+    rows = rows.get("data") if isinstance(rows, dict) else rows
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+_history = Cached(600, _tautulli_history)
+
+
+def history():
+    """Tautulli's recent plays, or None when it is not configured."""
+    return _history()
+
+
+def _history_when(value):
+    try:
+        return datetime.fromtimestamp(float(value), timezone.utc)
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
+
+def _history_ago(when):
+    if not when:
+        return "unknown"
+    days = max(0, int((datetime.now(timezone.utc) - when).total_seconds() // 86400))
+    return "today" if not days else "%sd" % days
+
+
+def _plex_history(q):
+    """Small search view of the same history graph.py turns into nodes."""
+    try:
+        rows = history()
+    except Exception:  # noqa: BLE001 - Tautulli is optional
+        return None
+    if rows is None:
+        return None
+    titles, viewers = {}, {}
+    for row in rows:
+        media_type = str(row.get("media_type") or "").lower()
+        if media_type == "track" or media_type not in ("movie", "episode"):
+            continue
+        title = str((row.get("grandparent_title") if media_type == "episode" else row.get("title")) or row.get("full_title") or "").strip()
+        key = str((row.get("grandparent_rating_key") if media_type == "episode" else row.get("rating_key")) or row.get("rating_key") or "").strip()
+        viewer = str(row.get("friendly_name") or row.get("user") or row.get("user_id") or "").strip()
+        if not title or not key or not viewer:
+            continue
+        when = _history_when(row.get("date"))
+        t = titles.setdefault(key, {"title": title, "plays": 0, "viewers": set(), "last": None})
+        t["plays"] += 1
+        t["viewers"].add(viewer)
+        t["last"] = max(filter(None, (t["last"], when)), default=None)
+        v = viewers.setdefault(viewer, {"plays": 0, "titles": {}})
+        v["plays"] += 1
+        v["titles"][title] = v["titles"].get(title, 0) + 1
+    text = q.strip().lower()
+    title_items = sorted(titles.values(), key=lambda x: (x["last"] or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
+    if text:
+        title_items = [t for t in title_items if text in t["title"].lower()]
+    else:
+        title_items = title_items[:10]
+    items = [{"title": t["title"], "subtitle": "watched by %s · %s play%s · last %s" % (", ".join(sorted(t["viewers"])), t["plays"], "" if t["plays"] == 1 else "s", _history_ago(t["last"]))}
+             for t in title_items]
+    if text:
+        for name, v in sorted(viewers.items()):
+            if text not in name.lower():
+                continue
+            top = sorted(v["titles"].items(), key=lambda x: (-x[1], x[0].lower()))[0][0]
+            items.append({"title": name, "subtitle": "%s play%s · top: %s" % (v["plays"], "" if v["plays"] == 1 else "s", top)})
+    return {"source": "media", "title": "Plex history", "items": items[:PER_GROUP]} if items else None
+
+
 def _radarr(q):
     items = [{"title": "%s (%s)" % (m.get("title"), m.get("year")),
               "subtitle": " · ".join(filter(None, ["on disk" if m.get("hasFile") else "missing",
@@ -277,7 +352,9 @@ def plan(q, scope=None):
     if kind in ("host", "ip", "app"):
         sources.append(("Prometheus", lambda: _prometheus(q)))
     if len(q) >= 3:
-        sources += [("Radarr", lambda: _radarr(q)), ("Sonarr", lambda: _sonarr(q)), ("Watch", lambda: _watch(q)), ("AIKB", lambda: _aikb(q))]
+        sources += [("Radarr", lambda: _radarr(q)), ("Sonarr", lambda: _sonarr(q)), ("Watch", lambda: _watch(q)), ("Tautulli", lambda: _plex_history(q)), ("AIKB", lambda: _aikb(q))]
+    elif scope == "media" and not q:
+        sources.append(("Tautulli", lambda: _plex_history(q)))
     if len(q) >= 3 or scope == "ops":
         sources.append(("Ops", lambda: _ops(q)))
     resolved = fleet.short(q) if kind == "host" else None
@@ -326,7 +403,7 @@ FULL_TTL = 60
 
 def search(q, mode="fast", scope=None):
     scope, q = parse_scope(q, scope)
-    if len(q) < 2 and scope != "ops":
+    if len(q) < 2 and scope not in ("ops", "media"):
         return {"q": q, "kind": None, "groups": []}
     if parse_path(q):
         groups = _groups_of(_path(q))
@@ -351,7 +428,7 @@ def stream(q, scope=None):
       {"type": "done", groups: [local mirror matches]}
     A cached result replays at once, so a repeat search looks finished immediately."""
     scope, q = parse_scope(q, scope)
-    if len(q) < 2 and scope != "ops":
+    if len(q) < 2 and scope not in ("ops", "media"):
         yield {"type": "done", "groups": []}
         return
     key = "%s:%s" % (scope, q.lower())
