@@ -32,8 +32,13 @@ def parse_path(q):
     text = (q or "").strip()
     m = re.match(r"^path\s*:\s*(.+?)\s*(?:->|\bto\b|\.\.)\s*(.+?)$", text, re.I)
     if not m:
-        m = re.match(r"^(.+?)\s*\.\.\s*(.+?)$", text)
-    return (m.group(1).strip(), m.group(2).strip()) if m and m.group(1).strip() and m.group(2).strip() else None
+        # bare form needs spaces, so IP ranges and v1..v2 stay ordinary searches
+        m = re.match(r"^(.+?)\s+(?:\.\.|->)\s+(.+?)$", text)
+    if not m:
+        return None
+    # "host:babbage .. turing": a scope prefix on an end just names the end
+    a, b = (re.sub(r"^(?:host|kb)\s*:\s*", "", g.strip(), flags=re.I) for g in m.groups())
+    return (a, b) if a and b else None
 
 
 def kind_of(q):

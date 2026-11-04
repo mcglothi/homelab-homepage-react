@@ -32,7 +32,10 @@ class GraphPathTest(unittest.TestCase):
         self.assertEqual(search.parse_path("path: plex .. vaultwarden"), ("plex", "vaultwarden"))
         self.assertEqual(search.parse_path("path: plex -> vaultwarden"), ("plex", "vaultwarden"))
         self.assertEqual(search.parse_path("path: plex to vaultwarden"), ("plex", "vaultwarden"))
-        self.assertIsNone(search.parse_path("plex -> vaultwarden"))
+        self.assertEqual(search.parse_path("plex -> vaultwarden"), ("plex", "vaultwarden"))
+        self.assertEqual(search.parse_path("host:babbage .. turing"), ("babbage", "turing"))
+        for q in ("10.10.10.1..10.10.10.50", "v1..v2", "how to restore vaultwarden"):
+            self.assertIsNone(search.parse_path(q), q)
 
     def test_path_build_uses_note_bridge_and_marks_endpoints(self):
         data = graph.build("plex .. vaultwarden")
