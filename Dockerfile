@@ -6,19 +6,15 @@ RUN npm ci --production=false
 COPY . .
 RUN npm run build
 
-# Stage 2: Run the Express proxy + serve dist/
-FROM node:20-alpine
+# Stage 2: the Python server (backend/server.py, stdlib only) serves dist/ and /api/*
+FROM python:3.13-slim
 WORKDIR /app
-# Server deps only
-COPY server/package*.json ./server/
-RUN cd server && npm ci --production
-# Built assets
+COPY backend ./backend
 COPY --from=builder /app/dist ./dist
-# Proxy server
-COPY server/proxy.cjs ./server/proxy.cjs
-# Service catalog, read by the proxy's health probe (package.json marks src/*.js as ESM)
-COPY package.json ./
+# Service catalog, read by /api/health and search (backend/homeapi/routes.py)
 COPY src/services.js ./src/services.js
+# Mirror database (backend/homeapi/mirror.py); compose mounts a volume here
+RUN mkdir -p /app/data
 EXPOSE 3010
-ENV PORT=3010 NODE_ENV=production
-CMD ["node", "server/proxy.cjs"]
+ENV PORT=3010 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+CMD ["python3", "backend/server.py"]
