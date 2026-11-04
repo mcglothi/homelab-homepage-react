@@ -308,19 +308,20 @@ export function metrics(nodes, edges, size) {
 
 // Newman modularity for the community assignment metrics() just found.
 export function modularity(nodes, edges) {
-  if (!edges.length || !nodes.length) return 0
   const byId = new Map(nodes.map(n => [n.id, n]))
   const degree = new Map(nodes.map(n => [n.id, 0]))
   const inside = new Map()
+  let m = 0   // only links inside this node set count (no dangling ends, no self-loops), or Q drifts and 0/0 is NaN
   edges.forEach(e => {
-    if (!byId.has(e.a) || !byId.has(e.b)) return
+    if (!byId.has(e.a) || !byId.has(e.b) || e.a === e.b) return
+    m++
     degree.set(e.a, degree.get(e.a) + 1); degree.set(e.b, degree.get(e.b) + 1)
     const a = byId.get(e.a), b = byId.get(e.b)
     if (a.comm === b.comm) inside.set(a.comm, (inside.get(a.comm) || 0) + 1)
   })
   const totals = new Map()
   nodes.forEach(n => totals.set(n.comm, (totals.get(n.comm) || 0) + degree.get(n.id)))
-  const m = edges.length
+  if (!m) return 0
   let q = 0
   totals.forEach((total, comm) => { q += (inside.get(comm) || 0) / m - (total / (2 * m)) ** 2 })
   return q
@@ -341,7 +342,7 @@ export function surprising(nodes, edges, n = 5) {
   const given = nodes.every(x => Number.isFinite(x.deg))
   const deg = new Map(nodes.map(x => [x.id, given ? x.deg : 0]))
   if (!given) edges.forEach(e => { deg.set(e.a, (deg.get(e.a) || 0) + 1); deg.set(e.b, (deg.get(e.b) || 0) + 1) })
-  const hubs = new Set(nodes.slice().sort((a, b) => b.bc - a.bc).slice(0, 3).map(x => x.id))
+  const hubs = new Set(nodes.filter(x => !x.fold && x.bc > 0).sort((a, b) => b.bc - a.bc).slice(0, 3).map(x => x.id))
   // '+N more' fold nodes are placeholders, not things
   return edges.map(e => ({ ...e, a: byId.get(e.a), b: byId.get(e.b) }))
     .filter(e => e.a && e.b && !e.a.fold && !e.b.fold && e.a.comm !== e.b.comm && e.a.kind !== e.b.kind && !hubs.has(e.a.id) && !hubs.has(e.b.id))
