@@ -32,6 +32,7 @@ SENSELESS_URL = lambda: cfg("SENSELESS_URL", "http://10.10.10.10:8780")       # 
 OPENSOAK_URL = lambda: cfg("OPENSOAK_URL", "https://opensoak.home.timmcg.net")  # noqa: E731
 WATCH_URL = lambda: cfg("WATCH_URL", "http://10.10.10.50:8790")               # noqa: E731
 AIKB_HEALTH_URL = lambda: cfg("AIKB_HEALTH_URL", "http://10.10.10.50:8791")   # noqa: E731
+AIKB_SEARCH_URL = lambda: cfg("AIKB_SEARCH_URL", "http://10.10.10.50:8793")   # noqa: E731
 USAGE_URL = lambda: cfg("USAGE_URL", "")                                      # noqa: E731
 
 
