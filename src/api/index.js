@@ -26,6 +26,11 @@ export async function fetchPlex() {
         ? `${playing.grandparentTitle} ${playing.parentIndex > 0 ? 'S' + String(playing.parentIndex).padStart(2,'0') : ''}E${String(playing.index).padStart(2,'0')}`
         : playing.title
       : null,
+    // Playback position (ms) as of this poll; the top bar advances it between polls while playing
+    offset: playing?.viewOffset ?? null,
+    duration: playing?.duration ?? null,
+    state: playing?.Player?.state ?? null,
+    at: Date.now(),
   }
 }
 
