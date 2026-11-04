@@ -11,7 +11,8 @@ Edge flags: "inferred" (an app matched by its default port, not a published one)
 "missing" (a proxy forwarding to an address no host claims), "derived" (joined by IP).
 
 Node ids: h: host, pl: pool, ds: dataset, a: app, px: proxy name, d: DNS name, svc: card,
-ip: an address with no host, t: monitoring target, n: an AIKB note, q: the search.
+ip: an address with no host, t: monitoring target or media title, u: Plex viewer, dev: playback device,
+n: an AIKB note, q: the search.
 AIKB notes join last: host/app/card -> each note that mentions it (AIKB_SEARCH_URL /mentions),
 only for the start nodes (or the node being expanded), so the graph stays readable. A text search
 also starts from the notes AIKB finds for it (/search), joined to the fleet nodes they name
@@ -23,6 +24,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import re
+import threading
 from urllib.parse import quote, urlencode, urlsplit
 
 from . import fleet, routes, search
@@ -45,6 +47,7 @@ def _ops_state():
 
 _alerts = Cached(60, _ops_alerts)
 _state = Cached(60, _ops_state)
+_media_state = threading.local()
 
 
 def _days_left(expires):
@@ -142,6 +145,7 @@ def _gb(n):
 def _all(F, live=False):
     """Every node and edge the mirror knows (a few hundred), keyed by id."""
     nodes, edges, eseen = {}, [], set()
+    _media_state.warning = False
 
     def node(id, kind, label, sub="", attrs=None, **extra):
         nodes.setdefault(id, {"id": id, "kind": kind, "label": label, "sub": sub, "attrs": attrs or [], **extra})
@@ -267,6 +271,115 @@ def _all(F, live=False):
                 node(nid, "note", str(item["file"]).rsplit("/", 1)[-1][:-3], str(item["file"]),
                      [["File", str(item["file"])], ["Open", "/aikb/note?path=" + quote(str(item["file"]), safe="")], ["Source", "AIKB"]])
                 edge(iid, nid, "about", "mentioned in", via="AIKB")
+    try:
+        history = search.history()
+    except Exception:  # noqa: BLE001 - Tautulli is optional
+        history = None
+    if history is None:
+        _media_state.warning = True
+        return nodes, edges
+    movies = settle(search._movies) or []
+    series = settle(search._series) or []
+
+    def number(value):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return 0
+
+    def watched(value):
+        try:
+            return datetime.fromtimestamp(float(value), timezone.utc) if float(value) > 0 else None  # 0 = no date
+        except (TypeError, ValueError, OSError, OverflowError):
+            return None
+
+    def ago(when):
+        if not when:
+            return "unknown"
+        days = max(0, int((datetime.now(timezone.utc) - when).total_seconds() // 86400))
+        return "today" if not days else "%sd" % days
+
+    def library(title, year, media_type):
+        values = movies if media_type == "movie" else series
+        for item in values:
+            if str(item.get("title") or "").lower() != title.lower():
+                continue
+            # a show's episode row carries the episode's air year, not the series' premiere year
+            if media_type == "movie" and year and str(item.get("year") or "") != str(year):
+                continue
+            if media_type == "movie":
+                return ("on disk" if item.get("hasFile") else "missing", "https://radarr.home.timmcg.net/movie/%s" % item.get("titleSlug"))
+            return ("on disk" if number((item.get("statistics") or {}).get("episodeFileCount")) else "missing",
+                    "https://sonarr.home.timmcg.net/series/%s" % item.get("titleSlug"))
+        return None
+
+    titles, viewers, devices, plays = {}, {}, {}, []
+    for row in history:
+        if not isinstance(row, dict):
+            continue
+        media_type = str(row.get("media_type") or "").lower()
+        if media_type == "track" or media_type not in ("movie", "episode"):
+            continue
+        title = str((row.get("grandparent_title") if media_type == "episode" else row.get("title")) or row.get("full_title") or "").strip()
+        rating = str((row.get("grandparent_rating_key") if media_type == "episode" else row.get("rating_key")) or row.get("rating_key") or "").strip()
+        user_id = str(row.get("user_id") or "").strip()
+        viewer = str(row.get("friendly_name") or row.get("user") or user_id).strip()
+        player, platform = str(row.get("player") or "").strip(), str(row.get("platform") or "").strip()
+        if not title or not rating or not user_id or not viewer:
+            continue
+        tid, uid = "tt:" + rating, "u:" + user_id  # "t:" is Prometheus targets; the viewer folds by id prefix
+        did = "dev:%s|%s" % (player.lower(), platform.lower()) if player else None
+        when = watched(row.get("date"))
+        media = "movie" if media_type == "movie" else "show"
+        t = titles.setdefault(tid, {"id": tid, "title": title, "media": media, "year": row.get("year"), "plays": 0, "viewers": set(), "last": None, "episode": None})
+        t["plays"] += 1
+        t["viewers"].add(uid)
+        if when and (not t["last"] or when > t["last"]):
+            t["last"], t["episode"] = when, row.get("full_title") or row.get("title")
+        v = viewers.setdefault(uid, {"id": uid, "label": viewer, "plays": 0, "titles": set(), "devices": set(), "last": None})
+        v["plays"] += 1
+        v["titles"].add(tid)
+        v["last"] = max(filter(None, (v["last"], when)), default=None)
+        if did:
+            devices.setdefault(did, {"id": did, "label": player, "platform": platform, "product": str(row.get("product") or "").strip()})
+            v["devices"].add(did)
+        plays.append((uid, tid, did, when))
+    kept = sorted(titles.values(), key=lambda t: (-t["plays"], -(t["last"].timestamp() if t["last"] else 0), t["title"].lower()))[:60]
+    kept_ids = {t["id"] for t in kept}
+    used_viewers = {uid for uid, tid, _, _ in plays if tid in kept_ids}
+    used_devices = {did for _, tid, did, _ in plays if tid in kept_ids and did}
+    for t in kept:
+        label = t["title"] + (" (%s)" % t["year"] if t["media"] == "movie" and t["year"] else "")
+        attrs = [["Plays", str(t["plays"])], ["Viewers", str(len(t["viewers"]))]]
+        if t["media"] == "show" and t["episode"]:
+            attrs.append(["Last watched episode", str(t["episode"])])
+        found = library(t["title"], t["year"], t["media"])
+        if found:
+            attrs += [["In library", found[0]], ["Open", found[1]]]
+        node(t["id"], "title", label, "%s · %s · %s · last %s" % (t["media"], _n(t["plays"], "play"), _n(len(t["viewers"]), "viewer"), ago(t["last"])), attrs,
+             last=t["last"].isoformat() if t["last"] else None)
+    for uid in used_viewers:
+        v = viewers[uid]
+        node(uid, "viewer", v["label"], "%s · last %s" % (_n(v["plays"], "play"), ago(v["last"])),
+             [["Plays", str(v["plays"])], ["Titles", str(len(v["titles"]))], ["Devices", str(len(v["devices"]))]], last=v["last"].isoformat() if v["last"] else None)
+    for did in used_devices:
+        d = devices[did]
+        node(did, "device", d["label"], " · ".join(filter(None, [d["platform"], d["product"]])))
+    grouped = {}
+    for uid, tid, did, when in plays:
+        if tid not in kept_ids or uid not in used_viewers:
+            continue
+        p = grouped.setdefault((uid, tid), {"plays": 0, "last": None})
+        p["plays"] += 1
+        p["last"] = max(filter(None, (p["last"], when)), default=None)
+        if did:
+            edge(uid, did, "watches_on", "watches on", via="Tautulli")
+    for (uid, tid), p in grouped.items():
+        edge(uid, tid, "watched", "watched", via="Tautulli", detail="%s, last %s" % (_n(p["plays"], "play"), p["last"].date().isoformat() if p["last"] else "unknown"))
+    plex = next((i for i, n in nodes.items() if n["kind"] == "app" and n["label"].lower() == "plex"), None)
+    if plex:
+        for t in kept:
+            edge(t["id"], plex, "served_by", "served by", via="Tautulli")
     return nodes, edges
 
 
@@ -276,12 +389,22 @@ def _seeds(q, nodes):
         return []
     aliases = {"alerts": "alert", "certs": "cert", "certificates": "cert", "incidents": "incident",
                "pending": "pending", "todo": "pending"}
+    if t in ("plex activity", "watched"):
+        return [i for i, n in nodes.items() if n["kind"] == "title"]
     if t in aliases:
         return [i for i, n in nodes.items() if n["kind"] == aliases[t]]
     exact = [i for i, n in nodes.items() if n["label"].lower() == t or i.split(":", 1)[1].lower() == t]
     if exact:
         return exact
     return [i for i, n in nodes.items() if t in n["label"].lower() or t in i.lower()]
+
+
+MEDIA_KINDS = ("viewer", "device", "title")
+AIKB_DOWN = "AIKB is unreachable, so notes are left out"
+
+
+def _n(count, word):
+    return "%s %s%s" % (count, word, "" if count == 1 else "s")
 
 
 def _around(start, edges, depth):
@@ -496,7 +619,11 @@ def build(q, expand=None, live=False, lens=None, videos=False):
     F = fleet.get()
     if lens == "concepts":
         return _concept_graph(q, expand, F, videos)
+    warnings = []
+    _media_state.warning = False
     nodes, edges = _all(F, live=live)
+    if getattr(_media_state, "warning", False):
+        warnings.append("Tautulli is unavailable, so media activity is left out")
     edges = _with_provenance(edges)
     if not expand and search.parse_path(q):
         return _path_graph(q, F, nodes, edges)
@@ -513,15 +640,27 @@ def build(q, expand=None, live=False, lens=None, videos=False):
         elif scope == "ops":
             ops = {i: n for i, n in nodes.items() if n["kind"] in ("alert", "cert", "incident", "pending")}
             seeds = _seeds(text, ops) if text else list(ops)
+        elif scope == "media":
+            media = {i: n for i, n in nodes.items() if n["kind"] in MEDIA_KINDS}
+            seeds = _seeds(text, media) if text else [i for i, n in media.items() if n["kind"] == "title"]
         else:
             seeds = [] if notes_only else _seeds(text, nodes)
-        keep = set(nodes) if everything else _around(seeds, edges, DEPTH)
+        if everything:
+            keep = set(nodes)
+        elif scope == "media" or (seeds and all(nodes[i]["kind"] in MEDIA_KINDS for i in seeds)):
+            # who watched it and what else they watched, but not every title Plex serves
+            own = [e for e in edges if e["kind"] != "served_by"]
+            keep = _around(seeds, own, DEPTH) | _around(seeds, edges, 1)
+        else:
+            # Plex history is 90 leaf nodes: a host two hops from Plex must not pull every title in.
+            # They show one hop from a start node (searching plex lists what was watched), no further.
+            fleet_edges = [e for e in edges if nodes.get(e["a"], {}).get("kind") not in MEDIA_KINDS and nodes.get(e["b"], {}).get("kind") not in MEDIA_KINDS]
+            keep = _around(seeds, fleet_edges, DEPTH) | (_around(seeds, edges, 1) - _around(seeds, fleet_edges, 1))
     truncated = len(keep) > CAP
     if truncated:   # keep the start nodes and their nearest first
         keep = set(seeds[:CAP]) | set(sorted(keep - set(seeds), key=lambda i: (nodes[i]["kind"] == "proxy", i))[:max(0, CAP - len(seeds))])
     out = {i: dict(nodes[i], result=i in seeds) for i in keep}
     out_edges = [e for e in edges if e["a"] in keep and e["b"] in keep]
-    warnings = []
     if not everything:
         # Notes that answer the search itself (a text search, or expanding a note) join as start nodes, linked to
         # the fleet nodes they name; those join the graph on their own, without their neighborhoods
@@ -538,8 +677,8 @@ def build(q, expand=None, live=False, lens=None, videos=False):
         if joins is None:
             # Nothing from AIKB: an expanded note must come back empty-handed, not as "no neighbors"
             found = {}
-            if not warnings:
-                warnings.append("AIKB is unreachable, so notes are left out")
+            if AIKB_DOWN not in warnings:
+                warnings.append(AIKB_DOWN)
         for nid in found:
             if titles.get(nid[2:]):
                 found[nid]["label"] = titles[nid[2:]]
@@ -555,8 +694,8 @@ def build(q, expand=None, live=False, lens=None, videos=False):
         seeds += [i for i in found if i not in seeds]
         notes, note_edges = _notes([s for s in seeds if s in keep], nodes)
         if notes is None:
-            if not warnings:
-                warnings.append("AIKB is unreachable, so notes are left out")
+            if AIKB_DOWN not in warnings:
+                warnings.append(AIKB_DOWN)
         else:
             for nid, n in notes.items():
                 out.setdefault(nid, dict(n, result=False))
