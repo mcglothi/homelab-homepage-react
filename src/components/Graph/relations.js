@@ -64,6 +64,8 @@ const T = {
   'watched|watched': ['Watched', 'Watched by', 'watched'],
   'watches_on|watches on': ['Watches on', 'Used by', 'watches on'],
   'served_by|served by': ['Served by', 'Serves', 'is served by'],
+  'noted|noted in': ['Noted in', 'Notes on', 'is noted in'],
+  'published|published': ['Published', 'Published by', 'published'],
   'covers|covers': ['Covers', 'Covered by', 'covers'],
   'cooccur|appear together': ['Appears with', 'Appears with', 'appears with'],
   'reported|reported': ['Reported', 'Reported by', 'reported'],
