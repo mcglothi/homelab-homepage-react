@@ -12,20 +12,23 @@ Edge flags: "inferred" (an app matched by its default port, not a published one)
 
 Node ids: h: host, pl: pool, ds: dataset, a: app, px: proxy name, d: DNS name, svc: card,
 ip: an address with no host, t: monitoring target, n: an AIKB note, q: the search.
-AIKB notes join last: host or app -> each note that mentions it (AIKB_SEARCH_URL /mentions),
-only for the start nodes (or the node being expanded), so the graph stays readable.
+AIKB notes join last: host/app/card -> each note that mentions it (AIKB_SEARCH_URL /mentions),
+only for the start nodes (or the node being expanded), so the graph stays readable. A text search
+also starts from the notes AIKB finds for it (/search), joined to the fleet nodes they name
+(/links); `kb:` searches start from notes only. Expanding a note adds what it names.
 """
 
 from collections import defaultdict
 from urllib.parse import quote, urlencode, urlsplit
 
-from . import fleet, routes
+from . import fleet, routes, search
 from .common import fetch_local, parallel, settle
 
 CAP = 400      # nodes per graph; `truncated` says when it bites
 DEPTH = 2      # hops from the start nodes
 NOTE_LOOKUPS = 6   # hosts/apps asked about per graph
 NOTES_EACH = 5     # notes per host/app
+NOTE_SEEDS = 8     # notes a text search starts from
 
 
 def _gb(n):
@@ -134,52 +137,120 @@ def _around(start, edges, depth):
     return seen
 
 
+def _aikb(endpoint, **params):
+    """One GET to the AIKB facade; None when it is down or answers with an error body."""
+    url = routes.AIKB_SEARCH_URL() + endpoint + "?" + urlencode(params, doseq=True)
+    r = settle(lambda: fetch_local(url, timeout=6))
+    # fetch_local hands back an error body as JSON (a 500 from a locked index), so that counts as down too
+    return r if isinstance(r, dict) and "error" not in r else None
+
+
+def _note(file, title=None):
+    return {"id": "n:" + file, "kind": "note", "label": title or file.rsplit("/", 1)[-1][:-3], "sub": file,
+            "attrs": [["File", file], ["Open", "/aikb/note?path=" + quote(file, safe="")], ["Source", "AIKB"]]}
+
+
+def _mention(a, nid, section=None):
+    return {"a": a, "b": nid, "kind": "about", "label": "mentions", "flag": None,
+            "detail": "section: %s" % section if section else None, "via": "AIKB"}
+
+
 def _notes(ids, nodes):
     """AIKB notes that mention these hosts/apps/cards, as extra nodes and edges. None when AIKB is down."""
     asks = [i for i in ids if nodes[i]["kind"] in ("host", "app", "service")][:NOTE_LOOKUPS]
     if not asks:
         return {}, []
-    url = routes.AIKB_SEARCH_URL() + "/mentions?"
-    found = parallel(*[(lambda i=i: settle(lambda: fetch_local(url + urlencode({"name": nodes[i]["label"], "limit": NOTES_EACH}), timeout=4)))
-                       for i in asks])
-    # fetch_local hands back an error body as JSON (a 500 from a locked index), so that counts as down too
-    if all(not isinstance(f, dict) or "error" in f for f in found):
+    found = parallel(*[(lambda i=i: _aikb("/mentions", name=nodes[i]["label"], limit=NOTES_EACH)) for i in asks])
+    if all(f is None for f in found):
         return None, []
     out, edges = {}, []
     for i, f in zip(asks, found):
         for n in (f or {}).get("notes") or []:
-            nid = "n:" + n["file"]
-            out.setdefault(nid, {"id": nid, "kind": "note", "label": n.get("title") or n["file"], "sub": n["file"],
-                                 "attrs": [["File", n["file"]], ["Open", "/aikb/note?path=" + quote(n["file"], safe="")], ["Source", "AIKB"]]})
-            edges.append({"a": i, "b": nid, "kind": "about", "label": "mentions", "flag": None,
-                          "detail": "section: %s" % n.get("section") if n.get("section") else None, "via": "AIKB"})
+            out.setdefault("n:" + n["file"], _note(n["file"], n.get("title")))
+            edges.append(_mention(i, "n:" + n["file"], n.get("section")))
     return out, edges
+
+
+def _joins(files, nodes, F):
+    """The fleet nodes each note names (host, app, card, proxy and DNS names by label; IPs by the host that has
+    them), as mention edges, plus each note's title. (None, {}) when AIKB is down."""
+    got = _aikb("/links", path=files, limit=80)
+    if got is None:
+        return None, {}
+    by = defaultdict(list)
+    for i, n in nodes.items():
+        if n["kind"] in ("host", "app", "service", "proxy", "dns"):
+            by[n["label"].lower()].append(i)
+    edges = []
+    for file, names in (got.get("links") or {}).items():
+        for e in names:
+            name = (e.get("name") or "").lower()
+            ids = by.get(name) or (["h:" + F["ip_of"][name]] if e.get("kind") == "ip" and name in F["ip_of"] else [])
+            edges += [_mention(i, "n:" + file) for i in ids if i in nodes]
+    return edges, got.get("titles") or {}
 
 
 def build(q, expand=None, live=False):
     F = fleet.get()
     nodes, edges = _all(F, live=live)
+    everything = not expand and q.strip() in ("*", "all")
+    # host:/app:/media:/kb: prefixes as the search bar has them; kb: starts from notes only
+    scope, text = search.parse_scope(q)
+    notes_only = scope == "aikb"
     if expand:
         keep = _around([expand], edges, 1) if expand in nodes else set()
         seeds = [expand]
     else:
-        everything = q.strip() in ("*", "all")
-        seeds = list(nodes) if everything else _seeds(q, nodes)
+        seeds = list(nodes) if everything else [] if notes_only else _seeds(text, nodes)
         keep = set(nodes) if everything else _around(seeds, edges, DEPTH)
     truncated = len(keep) > CAP
     if truncated:   # keep the start nodes and their nearest first
         keep = set(seeds[:CAP]) | set(sorted(keep - set(seeds), key=lambda i: (nodes[i]["kind"] == "proxy", i))[:max(0, CAP - len(seeds))])
-    out_nodes = [dict(nodes[i], result=i in seeds) for i in keep]
+    out = {i: dict(nodes[i], result=i in seeds) for i in keep}
     out_edges = [e for e in edges if e["a"] in keep and e["b"] in keep]
     warnings = []
-    if not (q.strip() in ("*", "all") and not expand):
+    if not everything:
+        # Notes that answer the search itself (a text search, or expanding a note) join as start nodes, linked to
+        # the fleet nodes they name; those join the graph on their own, without their neighborhoods
+        found = {}
+        if expand and expand.startswith("n:"):
+            found[expand] = _note(expand[2:])   # the viewer already has this node; the title comes from /links below
+        elif not expand and len(text) >= 3:
+            res = _aikb("/search", q=text, k=NOTE_SEEDS)
+            if res is None:
+                warnings.append("AIKB is unreachable, so notes are left out")
+            for r in (res or {}).get("results") or []:
+                found.setdefault("n:" + r["file"], dict(_note(r["file"], r.get("title")), result=True))
+        joins, titles = _joins([i[2:] for i in found], nodes, F) if found else ([], {})
+        if joins is None:
+            # Nothing from AIKB: an expanded note must come back empty-handed, not as "no neighbors"
+            found = {}
+            if not warnings:
+                warnings.append("AIKB is unreachable, so notes are left out")
+        for nid in found:
+            if titles.get(nid[2:]):
+                found[nid]["label"] = titles[nid[2:]]
+        for nid, n in found.items():
+            out.setdefault(nid, dict(n, result=n.get("result", False)))
+        joins = joins or []
+        for e in joins:
+            if e["a"] not in out and len(out) >= CAP:
+                truncated = True
+                continue
+            out.setdefault(e["a"], dict(nodes[e["a"]], result=False))
+        out_edges += [e for e in joins if e["a"] in out]
+        seeds += [i for i in found if i not in seeds]
         notes, note_edges = _notes([s for s in seeds if s in keep], nodes)
         if notes is None:
-            warnings.append("AIKB is unreachable, so notes are left out")
+            if not warnings:
+                warnings.append("AIKB is unreachable, so notes are left out")
         else:
-            out_nodes += [dict(n, result=False) for n in notes.values()]
+            for nid, n in notes.items():
+                out.setdefault(nid, dict(n, result=False))
             out_edges += note_edges
+    seen = set()
+    out_edges = [e for e in out_edges if (e["a"], e["b"], e["kind"]) not in seen and not seen.add((e["a"], e["b"], e["kind"]))]
     hosts = [s for s in seeds if s.startswith("h:")]
-    return {"q": q, "nodes": out_nodes, "edges": out_edges, "seeds": seeds[:50], "listed": seeds, "matched": len(seeds),
+    return {"q": q, "nodes": list(out.values()), "edges": out_edges, "seeds": seeds[:50], "listed": seeds, "matched": len(seeds),
             "resolved": nodes[hosts[0]]["label"] if len(hosts) == 1 else None, "truncated": truncated,
             "coverage": {"list": len(seeds), "covered": len(seeds), "nodes": len(seeds), "groups": []}, "warnings": warnings}

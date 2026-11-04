@@ -432,16 +432,18 @@ function Collapse({ mode, overlay, children }) {
 
 // One row behind a count (a ticket, an AAP job): it opens its own page in a new tab. A span, not an anchor, because
 // the row it sits in is already a link (the person search); clicks here never reach that link.
-function ChildRow({ c }) {
-  const go = e => { e.preventDefault(); e.stopPropagation(); if (c.href) window.open(c.href, '_blank', 'noopener,noreferrer') }
+function ChildRow({ c, setQuery }) {
+  // A row with `search` runs that search (a host a note names); one with `href` opens it
+  const act = c.search && setQuery ? 'search' : c.href ? 'open' : null
+  const go = e => { e.preventDefault(); e.stopPropagation(); if (act === 'search') setQuery(c.search); else if (act) window.open(c.href, '_blank', 'noopener,noreferrer') }
   return (
     <div style={{ padding: '3px 0 3px 12px', borderLeft: `2px solid ${alpha(C.text, '1a')}`, marginBottom: 2 }}>
-      <span role={c.href ? 'link' : undefined} tabIndex={c.href ? 0 : undefined} onClick={c.href ? go : e => e.stopPropagation()}
-            onKeyDown={c.href ? e => { if (e.key === 'Enter') go(e) } : undefined}
-            title={c.href ? `Open ${c.href}` : undefined}
-            style={{ fontSize: 12, color: c.muted ? C.dim : c.href ? C.accent : C.muted, cursor: c.href ? 'pointer' : 'default',
-                     textDecoration: c.href ? 'underline' : 'none', textDecorationColor: alpha(C.accent, '55'), overflowWrap: 'anywhere' }}>
-        {c.title}{c.href ? ' ↗' : ''}
+      <span role={act ? 'link' : undefined} tabIndex={act ? 0 : undefined} onClick={act ? go : e => e.stopPropagation()}
+            onKeyDown={act ? e => { if (e.key === 'Enter') go(e) } : undefined}
+            title={act === 'search' ? `Search ${c.search}` : act ? `Open ${c.href}` : undefined}
+            style={{ fontSize: 12, color: c.muted ? C.dim : act ? C.accent : C.muted, cursor: act ? 'pointer' : 'default',
+                     textDecoration: act ? 'underline' : 'none', textDecorationColor: alpha(C.accent, '55'), overflowWrap: 'anywhere' }}>
+        {c.title}{act === 'search' ? ' ⌕' : act ? ' ↗' : ''}
       </span>
       {c.subtitle && <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim }}>{c.subtitle}</div>}
     </div>
@@ -626,7 +628,7 @@ function Item({ it, setQuery, collapseSignal, expandSignal, uncapped, paused }) 
             )}
             {it.children?.length > 0 && (
               <div style={{ margin: '6px 0 0', maxHeight: uncapped ? 'none' : '50vh', overflowY: uncapped ? 'visible' : 'auto' }}>
-                {it.children.map((c, i) => <ChildRow key={i} c={c} />)}
+                {it.children.map((c, i) => <ChildRow key={i} c={c} setQuery={setQuery} />)}
               </div>
             )}
           </div>

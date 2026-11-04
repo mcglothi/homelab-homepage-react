@@ -25,7 +25,7 @@ class AikbSourceTest(unittest.TestCase):
         self.assertEqual(group["source"], "aikb")
         self.assertEqual(group["items"][0], {"title": "Monitoring · Scrubs", "subtitle": "home-lab/services/monitoring.md · 2026-11-03",
                                                 "detail": "Scrubs weekly check", "href": "/aikb/note?path=home-lab%2Fservices%2Fmonitoring.md&section=Scrubs",
-                                                "internal": True, "children": [{"title": "turing", "subtitle": "host"}]})
+                                                "internal": True, "children": [{"title": "turing", "subtitle": "host", "search": "host:turing"}]})
 
     def test_empty_is_none(self):
         search.fetch_local = lambda *args, **kwargs: {"results": []}
