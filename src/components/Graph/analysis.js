@@ -5,7 +5,7 @@
 // Kinds of node, in the order the Groups list shows them. Colors come from the theme (theme.js).
 export const KIND = {
   host: 'Hosts / VMs', pool: 'ZFS pools', dataset: 'Datasets', app: 'Apps', service: 'Dashboard cards',
-  proxy: 'Proxy names (NPM)', dns: 'DNS names', network: 'Addresses', target: 'Monitoring targets', query: 'The search',
+  proxy: 'Proxy names (NPM)', dns: 'DNS names', network: 'Addresses', target: 'Monitoring targets', note: 'AIKB notes', query: 'The search',
 }
 
 // ── Intent ───────────────────────────────────────────────────────────────────
@@ -14,7 +14,7 @@ export const KIND = {
 // that node's facet to the front. A facet's place in the order is its weight.
 export const FACETS = { servers: 'Hosts', storage: 'Storage', apps: 'Apps', network: 'Network', monitoring: 'Monitoring', found: 'Other sources' }
 const FACET_OF = { host: 'servers', pool: 'storage', dataset: 'storage', app: 'apps', service: 'apps', proxy: 'network', dns: 'network',
-  network: 'network', target: 'monitoring', query: 'found' }
+  network: 'network', target: 'monitoring', note: 'found', query: 'found' }
 export const facetOf = kind => FACET_OF[kind] || 'found'
 const ORDER = {
   host: ['servers', 'apps', 'storage', 'network', 'monitoring', 'found'],
