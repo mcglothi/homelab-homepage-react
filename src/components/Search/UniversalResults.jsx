@@ -26,6 +26,7 @@ const SOURCE = {
   media: { label: 'Media', color: C.amber },
   watch: { label: 'Watch', color: C.red },
   aikb: { label: 'AIKB', color: C.violet },
+  ops: { label: 'Ops', color: C.red },
   error: { label: 'Error', color: C.amber },
 }
 // Result sections, in page order. Each card lands in the first section listing its
@@ -34,6 +35,7 @@ const SECTIONS = [
   { key: 'path', label: 'Path', color: C.cyan, sources: ['path'] },
   { key: 'servers', label: 'Hosts', color: C.cyan, sources: ['host'] },
   { key: 'notes', label: 'Notes (AIKB)', color: C.violet, sources: ['aikb'] },
+  { key: 'ops', label: 'Ops', color: C.red, sources: ['ops'] },
   { key: 'apps', label: 'Apps & services', color: C.blue, sources: ['app', 'service', 'proxy'] },
   { key: 'health', label: 'Health & monitoring', color: C.orange, sources: ['health'] },
   { key: 'storage', label: 'Storage', color: C.violet, sources: ['pool', 'dataset'] },

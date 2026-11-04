@@ -1,6 +1,6 @@
 """/api/graph — the relationship graph behind the search Graph view, as {nodes, edges}.
 Same contract as the work Docket's graph (its Graph front end runs on it). Built from the
-mirror (fleet.py) only; ?live=1 adds Prometheus targets.
+mirror (fleet.py) plus cached operations state; ?live=1 adds Prometheus targets.
 
 Every edge runs parent (a) -> child (b). The chains:
     host -> pool -> dataset -> child dataset ; dataset -> app that mounts it
@@ -19,12 +19,14 @@ also starts from the notes AIKB finds for it (/search), joined to the fleet node
 """
 
 from collections import defaultdict, deque
+from datetime import datetime, timezone
+import hashlib
 import json
 import re
 from urllib.parse import quote, urlencode, urlsplit
 
 from . import fleet, routes, search
-from .common import fetch_local, parallel, request, settle
+from .common import Cached, fetch_local, parallel, request, settle
 
 CAP = 400      # nodes per graph; `truncated` says when it bites
 DEPTH = 2      # hops from the start nodes
@@ -33,11 +35,98 @@ NOTES_EACH = 5     # notes per host/app
 NOTE_SEEDS = 8     # notes a text search starts from
 
 
+def _ops_alerts():
+    return (fetch_local(routes.PROMETHEUS_URL() + "/api/v1/alerts", timeout=8) or {}).get("data", {}).get("alerts") or []
+
+
+def _ops_state():
+    return fetch_local(routes.AIKB_SEARCH_URL() + "/state", timeout=8) or {}
+
+
+_alerts = Cached(60, _ops_alerts)
+_state = Cached(60, _ops_state)
+
+
+def _days_left(expires):
+    try:
+        stamp = str(expires).replace("Z", "+00:00")
+        when = datetime.fromisoformat(stamp)
+        when = when.replace(tzinfo=timezone.utc) if when.tzinfo is None else when  # naive stamps are UTC
+        return int((when - datetime.now(timezone.utc)).total_seconds() // 86400)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cert_parent(name):
+    labels = (name or "").lower().lstrip("*.").split(".")
+    return ".".join(labels[-3:]) if len(labels) >= 3 else (name or "").lower()
+
+
+def _cert_groups(F):
+    """NPM gives one mirror row per name; collapse those aliases back to their certificate."""
+    groups = {}
+    for proxy in F["proxies"].values():
+        expires = proxy.get("cert_expires")
+        if not expires and not proxy.get("cert_id"):
+            continue  # plain-HTTP proxy: no certificate to show
+        # cert_id is NPM's certificate id (npm_id is the proxy's); older mirror rows lack it
+        key = str(proxy["cert_id"]) if proxy.get("cert_id") else "%s|%s" % (expires or "", _cert_parent(proxy["name"]))
+        cert = groups.setdefault(key, {"key": key, "npm_id": proxy.get("cert_id"), "expires": expires, "names": set(), "label": proxy.get("cert_name")})
+        cert["expires"], cert["label"] = cert["expires"] or expires, cert["label"] or proxy.get("cert_name")
+        cert["names"].add(proxy["name"])
+        cert["names"].update(proxy.get("aliases") or [])
+    return groups
+
+
+def certificates(F, state):
+    """NPM certificates merged with AIKB's _state.yaml ssl_certs; shared by the graph and the Ops search source."""
+    certs = _cert_groups(F)
+    for s in state.get("ssl_certs") or []:
+        if not isinstance(s, dict):
+            continue
+        sid, name = s.get("npm_cert_id"), str(s.get("name") or "")
+        if sid is None and not name:
+            continue
+        cert = next((c for c in certs.values() if sid is not None and str(c.get("npm_id")) == str(sid)), None)
+        # a stale id in the state file still merges when the name matches
+        cert = cert or next((c for c in certs.values() if name and name.lower() in {n.lower() for n in c["names"] | {c.get("label") or ""}}), None)
+        key = cert["key"] if cert else (str(sid) if sid is not None else name.lower())
+        cert = certs.setdefault(key, {"key": key, "npm_id": sid, "expires": s.get("expires"), "names": set(), "label": name or None})
+        if name and name != cert.get("label"):
+            cert["names"].add(name)
+        cert["expires"] = cert.get("expires") or s.get("expires")
+        cert["warn_after"], cert["file"] = s.get("warn_after"), s.get("file")
+    return certs
+
+
+def _warn_days(warn_after):
+    try:
+        return int(warn_after)
+    except (TypeError, ValueError):
+        return 21
+
+
+def _ops_item_id(prefix, item):
+    return "%s:%s" % (prefix, hashlib.sha1(str(item).encode()).hexdigest()[:10])
+
+
+def _item_fields(value):
+    value = value if isinstance(value, dict) else {"item": value}
+    return {"item": str(value.get("item") or value.get("title") or value.get("name") or "Untitled"),
+            "detail": value.get("detail") or value.get("description") or value.get("summary"),
+            "blocked_by": value.get("blocked_by"), "priority": value.get("priority"),
+            "project": value.get("project"), "file": value.get("file")}
+
+
+def _whole_word_mentions(text, label):
+    return bool(label and re.search(r"(?<!\w)%s(?!\w)" % re.escape(label), text, re.I))
+
+
 def _provenance(kind, flag=None, via=None):
     """One policy for every graph edge, including future edge kinds."""
     if flag in ("missing", "ambiguous"):
         return "ambiguous"
-    if flag in ("inferred", "derived") or kind == "cooccur":
+    if flag in ("inferred", "derived") or kind == "cooccur" or via == "AIKB inferred":
         return "inferred"
     return "extracted"
 
@@ -128,6 +217,56 @@ def _all(F, live=False):
                        [["Job", lab.get("job")], ["Instance", inst], ["Health", t.get("health")], ["Last scrape", (t.get("lastScrape") or "")[:19]],
                         ["Source", "Prometheus"]], missing=t.get("health") != "up")
             edge("h:" + hk, tid, "monitor", "scraped by", via="Prometheus")
+    alerts, state = parallel(lambda: settle(_alerts), lambda: settle(_state))
+    alerts, state = alerts or [], state or {}
+    for alert in alerts:
+        labels, annotations = alert.get("labels") or {}, alert.get("annotations") or {}
+        name, instance = labels.get("alertname") or "Alert", labels.get("instance") or ""
+        # alertname+instance isn't unique (DiskFull per mountpoint, host-only alerts)
+        where = "|".join(filter(None, [instance or labels.get("host")] + [labels.get(k) for k in ("mountpoint", "device", "name")]))
+        since = (alert.get("activeAt") or "")[:16]
+        aid = node("al:%s|%s" % (name, where), "alert", name,
+                   " · ".join(filter(None, [labels.get("severity"), alert.get("state"), "since " + since if since else None])),
+                   [["Summary", annotations.get("summary") or "—"], ["Description", annotations.get("description") or "—"],
+                    ["Instance", instance or "—"], ["Job", labels.get("job") or "—"], ["Source", "Prometheus"]],
+                   missing=alert.get("state") == "firing")
+        hostpart = urlsplit(instance if "://" in instance else "//" + instance).hostname or instance.split(":", 1)[0]
+        host = (labels.get("host") or "").rsplit(":", 1)[0] if (labels.get("host") or "").count(":") == 1 else labels.get("host")
+        hk = (F["ip_of"].get(host) or (fleet.short(host) if fleet.short(host) in F["hosts"] else None)) if host else None
+        hk = hk or F["ip_of"].get(hostpart) or (fleet.short(hostpart) if fleet.short(hostpart) in F["hosts"] else None)
+        if hk:
+            edge("h:" + hk, aid, "alerts", "is alerting", via="Prometheus")
+    certs = certificates(F, state)
+    for cert in certs.values():
+        names, expires = sorted(cert["names"]), cert.get("expires")
+        days = _days_left(expires)
+        attrs = [["Expires", expires or "—"], ["Days left", str(days) if days is not None else "—"],
+                 ["Names covered", "%s: %s" % (len(names), ", ".join(names[:4]))], ["Source", "Nginx Proxy Manager"]]
+        if cert.get("warn_after") is not None:
+            attrs.append(["Warn after", str(cert["warn_after"])])
+        if cert.get("file"):
+            attrs.append(["Open", "/aikb/note?path=" + quote(str(cert["file"]), safe="")])
+        cid = node("cert:" + cert["key"], "cert", cert.get("label") or (names[0] if names else "Certificate"),
+                   "expires in %s days" % days if days is not None else "expiry unknown", attrs,
+                   missing=days is not None and days < _warn_days(cert.get("warn_after")))
+        for name in names:
+            edge(cid, "px:" + name, "covers", "covers", via="NPM")
+    for prefix, kind, values in (("inc", "incident", state.get("open_incidents") or []), ("todo", "pending", state.get("pending") or [])):
+        for raw in values:
+            item = _item_fields(raw)
+            iid = node(_ops_item_id(prefix, item["item"] + "\n" + str(item["detail"] or "")), kind, item["item"][:60],
+                       " · ".join(filter(None, [str(item["priority"]) if item["priority"] else None, str(item["project"]) if item["project"] else None])),
+                       [["Detail", item["detail"] or "—"], ["Blocked by", item["blocked_by"] or "—"]]
+                       + ([["Open", "/aikb/note?path=" + quote(str(item["file"]), safe="")]] if item["file"] else []))
+            text = " ".join(str(item[k] or "") for k in ("item", "detail"))
+            for fid, candidate in nodes.copy().items():
+                if candidate["kind"] in ("host", "app", "service") and _whole_word_mentions(text, candidate["label"]):
+                    edge(fid, iid, "about", "mentioned in", via="AIKB inferred")
+            if item["file"]:
+                nid = "n:" + str(item["file"])
+                node(nid, "note", str(item["file"]).rsplit("/", 1)[-1][:-3], str(item["file"]),
+                     [["File", str(item["file"])], ["Open", "/aikb/note?path=" + quote(str(item["file"]), safe="")], ["Source", "AIKB"]])
+                edge(iid, nid, "about", "mentioned in", via="AIKB")
     return nodes, edges
 
 
@@ -135,6 +274,10 @@ def _seeds(q, nodes):
     t = q.strip().lower()
     if not t:
         return []
+    aliases = {"alerts": "alert", "certs": "cert", "certificates": "cert", "incidents": "incident",
+               "pending": "pending", "todo": "pending"}
+    if t in aliases:
+        return [i for i, n in nodes.items() if n["kind"] == aliases[t]]
     exact = [i for i, n in nodes.items() if n["label"].lower() == t or i.split(":", 1)[1].lower() == t]
     if exact:
         return exact
@@ -358,14 +501,20 @@ def build(q, expand=None, live=False, lens=None, videos=False):
     if not expand and search.parse_path(q):
         return _path_graph(q, F, nodes, edges)
     everything = not expand and q.strip() in ("*", "all")
-    # host:/app:/media:/kb: prefixes as the search bar has them; kb: starts from notes only
+    # host:/app:/media:/kb:/ops: prefixes as the search bar has them; kb: starts from notes only
     scope, text = search.parse_scope(q)
     notes_only = scope == "aikb"
     if expand:
         keep = _around([expand], edges, 1) if expand in nodes else set()
         seeds = [expand]
     else:
-        seeds = list(nodes) if everything else [] if notes_only else _seeds(text, nodes)
+        if everything:
+            seeds = list(nodes)
+        elif scope == "ops":
+            ops = {i: n for i, n in nodes.items() if n["kind"] in ("alert", "cert", "incident", "pending")}
+            seeds = _seeds(text, ops) if text else list(ops)
+        else:
+            seeds = [] if notes_only else _seeds(text, nodes)
         keep = set(nodes) if everything else _around(seeds, edges, DEPTH)
     truncated = len(keep) > CAP
     if truncated:   # keep the start nodes and their nearest first

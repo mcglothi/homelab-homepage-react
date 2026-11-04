@@ -5,7 +5,7 @@ Same contract as the work Docket's search (its front end runs unchanged on it).
          safe on every keystroke.
   full — fast plus live lookups chosen by what the query looks like (kind_of):
            host / ip → Prometheus targets and firing alerts on it
-           anything  → Radarr movies, Sonarr series, the watch ledger, AIKB notes
+           anything  → Radarr movies, Sonarr series, the watch ledger, AIKB notes and operations state
 Each live source fails on its own: an error becomes a note, never a blank result.
 
 Groups: {source, title, items: [{title, subtitle, detail?, href?, search?, status?, children?}]}.
@@ -14,17 +14,18 @@ Groups: {source, title, items: [{title, subtitle, detail?, href?, search?, statu
 import re
 import threading
 import time
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import fleet, routes
 from .common import Cached, fetch_local, js_quote
 
 PER_GROUP = 25
-SCOPE_PREFIX = re.compile(r"^(host|hosts|h|app|apps|media|m|aikb|kb|notes)\s*:\s*(.*)$", re.I)
-SCOPE_OF = {"host": "hosts", "hosts": "hosts", "h": "hosts", "app": "apps", "apps": "apps", "media": "media", "m": "media", "aikb": "aikb", "kb": "aikb", "notes": "aikb"}
+SCOPE_PREFIX = re.compile(r"^(host|hosts|h|app|apps|media|m|aikb|kb|notes|ops|alerts)\s*:\s*(.*)$", re.I)
+SCOPE_OF = {"host": "hosts", "hosts": "hosts", "h": "hosts", "app": "apps", "apps": "apps", "media": "media", "m": "media", "aikb": "aikb", "kb": "aikb", "notes": "aikb", "ops": "ops", "alerts": "ops"}
 SCOPE_TAGS = {"hosts": {"host", "dns", "network", "vm", "servers"}, "apps": {"app", "service", "proxy", "dataset"},
-              "media": {"media", "watch"}, "aikb": {"aikb"}}
-SCOPE_SOURCES = {"hosts": {"Prometheus"}, "apps": {"Prometheus"}, "media": {"Radarr", "Sonarr", "Watch"}, "aikb": {"AIKB"}}
+              "media": {"media", "watch"}, "aikb": {"aikb"}, "ops": set()}
+SCOPE_SOURCES = {"hosts": {"Prometheus"}, "apps": {"Prometheus"}, "media": {"Radarr", "Sonarr", "Watch"}, "aikb": {"AIKB"}, "ops": {"Ops"}}
 
 
 def parse_path(q):
@@ -120,6 +121,83 @@ def _prom_alerts():
     return (fetch_local(routes.PROMETHEUS_URL() + "/api/v1/alerts") or {}).get("data", {}).get("alerts") or []
 
 
+def _aikb_state():
+    return fetch_local(routes.AIKB_SEARCH_URL() + "/state", timeout=12) or {}
+
+
+_ops_alert_cache = Cached(60, _prom_alerts)
+_ops_state_cache = Cached(60, _aikb_state)
+
+
+def _ops_days(expires):
+    try:
+        stamp = str(expires).replace("Z", "+00:00")
+        when = datetime.fromisoformat(stamp)
+        when = when.replace(tzinfo=timezone.utc) if when.tzinfo is None else when
+        return int((when - datetime.now(timezone.utc)).total_seconds() // 86400)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ops_match(q, *values):
+    return not q or _hit(q, *values)
+
+
+def _ops_item(raw):
+    raw = raw if isinstance(raw, dict) else {"item": raw}
+    return {"item": str(raw.get("item") or raw.get("title") or raw.get("name") or "Untitled"),
+            "detail": raw.get("detail") or raw.get("description") or raw.get("summary"), "priority": raw.get("priority"),
+            "project": raw.get("project"), "file": raw.get("file"), "blocked_by": raw.get("blocked_by")}
+
+
+def _ops(q):
+    """The small, urgent slice of live data; a blank ops: query deliberately shows all of it."""
+    F = fleet.get()
+    try:
+        alerts = _ops_alert_cache()
+    except Exception:  # noqa: BLE001 - state trouble must not hide firing alerts
+        alerts = []
+    try:
+        state = _ops_state_cache()
+    except Exception:  # noqa: BLE001 - Prometheus trouble must not hide AIKB work
+        state = {}
+    rows = []
+    for alert in alerts:
+        labels, annotations = alert.get("labels") or {}, alert.get("annotations") or {}
+        if alert.get("state") != "firing" or not _ops_match(q, *labels.values(), *annotations.values()):
+            continue
+        severity = str(labels.get("severity") or "alert")
+        level = 0 if severity.lower() in ("critical", "page", "fatal") else 1
+        host = labels.get("host") or labels.get("instance") or labels.get("job")
+        rows.append((level, {"title": labels.get("alertname") or "Alert",
+                             "subtitle": " · ".join(filter(None, [severity, host, ("since " + alert["activeAt"][:16]) if alert.get("activeAt") else None])),
+                             "detail": annotations.get("summary") or annotations.get("description"), "status": "failed" if level == 0 else "open"}))
+    from . import graph  # graph imports search, so keep this local
+    certs = graph.certificates(F, state)
+    for cert in certs.values():
+        names, days = sorted(cert["names"]), _ops_days(cert["expires"])
+        if days is None or days >= 30 or not _ops_match(q, *names, cert.get("label"), cert["expires"]):
+            continue
+        level = 0 if days < 7 else 1
+        rows.append((level, {"title": cert.get("label") or names[0], "subtitle": "certificate · %s days left" % days,
+                             "detail": "%s name%s covered" % (len(names), "" if len(names) == 1 else "s"), "status": "failed" if level == 0 else "open"}))
+    for kind, values in (("incident", state.get("open_incidents") or []), ("pending", state.get("pending") or [])):
+        for raw in values:
+            item = _ops_item(raw)
+            if not _ops_match(q, item["item"], item["detail"], item["project"], item["blocked_by"], item["priority"]):
+                continue
+            priority = str(item["priority"] or kind)
+            urgent = priority.lower() in ("critical", "p0", "high")
+            # an open incident is live trouble; a to-do, however high, ranks below it
+            level = (0 if urgent else 1) if kind == "incident" else (1 if urgent else 2 if priority.lower() in ("warning", "p1", "medium") else 3)
+            rows.append((level, {"title": item["item"], "subtitle": " · ".join(filter(None, [priority, item["project"]])),
+                                "detail": item["detail"], "status": "failed" if level == 0 else "open",
+                                **({"href": "/aikb/note?path=" + js_quote(item["file"]), "internal": True} if item["file"] else {})}))
+    # within a level, live trouble (alerts, certs) before AIKB work items; rows were appended in that order
+    items = [row for _, _, row in sorted(((lv, n, r) for n, (lv, r) in enumerate(rows)), key=lambda t: (t[0], t[1]))]
+    return {"source": "ops", "title": "Ops", "items": items[:PER_GROUP]} if items else None
+
+
 def _prometheus(q):
     F = fleet.get()
     h = F["hosts"].get(fleet.short(q))
@@ -134,7 +212,7 @@ def _prometheus(q):
                for t in _prom_targets() if mine(t.get("labels", {}).get("instance")) or mine(t.get("labels", {}).get("job"))]
     a_items = [{"title": a.get("labels", {}).get("alertname"), "subtitle": "%s · since %s" % (a.get("state"), (a.get("activeAt") or "")[:16]),
                 "detail": (a.get("annotations") or {}).get("summary"), "status": "failed" if a.get("state") == "firing" else "open"}
-               for a in _prom_alerts() if any(mine(v) for v in (a.get("labels") or {}).values())]
+               for a in _ops_alert_cache() if any(mine(v) for v in (a.get("labels") or {}).values())]
     out = []
     if a_items:
         out.append({"source": "health", "title": "Prometheus alerts", "items": a_items})
@@ -191,7 +269,7 @@ def _aikb(q):
     return {"source": "aikb", "title": "AIKB notes", "items": items} if items else None
 
 
-def plan(q):
+def plan(q, scope=None):
     if parse_path(q):
         return "path", None, [("Path", lambda: _path(q))]
     kind = kind_of(q)
@@ -200,6 +278,8 @@ def plan(q):
         sources.append(("Prometheus", lambda: _prometheus(q)))
     if len(q) >= 3:
         sources += [("Radarr", lambda: _radarr(q)), ("Sonarr", lambda: _sonarr(q)), ("Watch", lambda: _watch(q)), ("AIKB", lambda: _aikb(q))]
+    if len(q) >= 3 or scope == "ops":
+        sources.append(("Ops", lambda: _ops(q)))
     resolved = fleet.short(q) if kind == "host" else None
     return kind, resolved, sources
 
@@ -246,12 +326,12 @@ FULL_TTL = 60
 
 def search(q, mode="fast", scope=None):
     scope, q = parse_scope(q, scope)
-    if len(q) < 2:
+    if len(q) < 2 and scope != "ops":
         return {"q": q, "kind": None, "groups": []}
     if parse_path(q):
         groups = _groups_of(_path(q))
         return {"q": q, "asked": q, "kind": "path", "resolved": None, "mode": mode, "scope": scope, "groups": groups}
-    kind, resolved, sources = plan(q)
+    kind, resolved, sources = plan(q, scope)
     sources, local = _scoped(scope, kind, resolved, sources, fast(q))
     if mode != "full":
         return {"q": q, "asked": q, "kind": kind, "resolved": resolved, "mode": "fast", "scope": scope, "groups": local}
@@ -271,7 +351,7 @@ def stream(q, scope=None):
       {"type": "done", groups: [local mirror matches]}
     A cached result replays at once, so a repeat search looks finished immediately."""
     scope, q = parse_scope(q, scope)
-    if len(q) < 2:
+    if len(q) < 2 and scope != "ops":
         yield {"type": "done", "groups": []}
         return
     key = "%s:%s" % (scope, q.lower())
@@ -283,7 +363,7 @@ def stream(q, scope=None):
         yield {"type": "source", "name": "cached", "groups": r["live"], "seconds": 0}
         yield {"type": "done", "groups": r["local"]}
         return
-    kind, resolved, sources = plan(q)
+    kind, resolved, sources = plan(q, scope)
     sources, local = _scoped(scope, kind, resolved, sources, fast(q))
     yield {"type": "start", "q": q, "asked": q, "kind": kind, "resolved": resolved, "sources": [n for n, _ in sources]}
     got = {}

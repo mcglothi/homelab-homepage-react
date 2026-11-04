@@ -5,27 +5,28 @@
 // Kinds of node, in the order the Groups list shows them. Colors come from the theme (theme.js).
 export const KIND = {
   host: 'Hosts / VMs', pool: 'ZFS pools', dataset: 'Datasets', app: 'Apps', service: 'Dashboard cards',
-  proxy: 'Proxy names (NPM)', dns: 'DNS names', network: 'Addresses', target: 'Monitoring targets', note: 'AIKB notes', query: 'The search', concept: 'Concepts',
+  proxy: 'Proxy names (NPM)', dns: 'DNS names', network: 'Addresses', target: 'Monitoring targets', alert: 'Alerts', cert: 'Certificates', incident: 'Incidents', pending: 'Pending (AIKB)', note: 'AIKB notes', query: 'The search', concept: 'Concepts',
 }
 
 // ── Intent ───────────────────────────────────────────────────────────────────
 // What the search is after decides which kinds of node lead. Kinds fall into facets (the chips the user
 // can see and change); each seed type has a priority order of facets, and a click on a node moves
 // that node's facet to the front. A facet's place in the order is its weight.
-export const FACETS = { servers: 'Hosts', storage: 'Storage', apps: 'Apps', network: 'Network', monitoring: 'Monitoring', found: 'Other sources' }
+export const FACETS = { servers: 'Hosts', storage: 'Storage', apps: 'Apps', network: 'Network', monitoring: 'Monitoring', ops: 'Ops', found: 'Other sources' }
 const FACET_OF = { host: 'servers', pool: 'storage', dataset: 'storage', app: 'apps', service: 'apps', proxy: 'network', dns: 'network',
-  network: 'network', target: 'monitoring', note: 'found', query: 'found', concept: 'found' }
+  network: 'network', target: 'monitoring', alert: 'ops', cert: 'ops', incident: 'ops', pending: 'ops', note: 'found', query: 'found', concept: 'found' }
 export const facetOf = kind => FACET_OF[kind] || 'found'
 const ORDER = {
-  host: ['servers', 'apps', 'storage', 'network', 'monitoring', 'found'],
-  app: ['apps', 'servers', 'storage', 'network', 'monitoring', 'found'],
-  storage: ['storage', 'apps', 'servers', 'network', 'monitoring', 'found'],
-  network: ['network', 'apps', 'servers', 'storage', 'monitoring', 'found'],
+  host: ['servers', 'apps', 'storage', 'network', 'monitoring', 'ops', 'found'],
+  app: ['apps', 'servers', 'storage', 'network', 'monitoring', 'ops', 'found'],
+  storage: ['storage', 'apps', 'servers', 'network', 'monitoring', 'ops', 'found'],
+  network: ['network', 'apps', 'servers', 'storage', 'monitoring', 'ops', 'found'],
+  ops: ['monitoring', 'ops', 'servers', 'apps', 'storage', 'network', 'found'],
 }
 export const WEIGHTS = [1, 0.85, 0.65, 0.5, 0.4, 0.3, 0.22, 0.16]
 export const initialOrder = seedId => {
   const p = (seedId || '').split(':')[0]
-  const kind = { h: 'host', a: 'app', svc: 'app', pl: 'storage', ds: 'storage', px: 'network', d: 'network', ip: 'network', t: 'host' }[p] || 'host'
+  const kind = { h: 'host', a: 'app', svc: 'app', pl: 'storage', ds: 'storage', px: 'network', d: 'network', ip: 'network', t: 'host', al: 'ops', cert: 'ops', inc: 'ops', todo: 'ops' }[p] || 'host'
   return ORDER[kind].slice()
 }
 // weight of a kind: its facet's place in the order; muted facets collapse

@@ -39,12 +39,86 @@ def load_search(root):
     return search.search
 
 
+def _as_list(value):
+    """A hand-edited `pending: none` must not be iterated as characters downstream."""
+    return value if isinstance(value, list) else []
+
+
+class StateUnavailable(RuntimeError):
+    pass
+
+
 class App:
     def __init__(self, root=None, search_fn=None):
         self.root = Path(root or os.environ.get("AIKB_ROOT", DEFAULT_ROOT)).resolve()
         self.db = self.root / "_tools" / "aikb-search" / "aikb_index.db"
         self.search_fn = search_fn or load_search(self.root)
         self.search_lock = threading.Lock()
+        self.state_mtime = None
+        self.state_value = None
+        self.state_lock = threading.Lock()
+
+    @staticmethod
+    def _short(value):
+        if hasattr(value, "isoformat"):
+            value = value.isoformat()
+        return value[:400] if isinstance(value, str) else value
+
+    def _open_note(self, value):
+        if not isinstance(value, str) or not value.endswith(".md"):
+            return None
+        try:
+            self.note(value)  # exactly the viewer's rules: absolute paths, symlinks, dot dirs, _runtime
+        except (OSError, ValueError):
+            return None
+        return value
+
+    def state(self):
+        """The curated state file is small; mtime avoids parsing it on every graph refresh."""
+        path = self.root / "_state.yaml"
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError as exc:
+            raise StateUnavailable(str(exc)) from None
+        with self.state_lock:
+            if self.state_mtime == mtime and self.state_value is not None:
+                return self.state_value
+            try:
+                import yaml  # pylint: disable=import-outside-toplevel
+            except ImportError as exc:
+                raise StateUnavailable("PyYAML is unavailable") from exc
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            except (OSError, UnicodeError, yaml.YAMLError) as exc:
+                raise StateUnavailable(str(exc)) from None
+            if not isinstance(data, dict):
+                raise StateUnavailable("_state.yaml is not a mapping")
+            certs = []
+            for raw in _as_list(data.get("ssl_certs")):
+                if not isinstance(raw, dict):
+                    continue
+                certs.append({"name": self._short(raw.get("name")), "npm_cert_id": self._short(raw.get("npm_cert_id")),
+                              "expires": self._short(raw.get("expires")), "warn_after": self._short(raw.get("warn_after")),
+                              "file": self._open_note(raw.get("file"))})
+            pending = []
+            for raw in _as_list(data.get("pending")):
+                if not isinstance(raw, dict):
+                    continue
+                pending.append({"item": self._short(raw.get("item")), "detail": self._short(raw.get("detail")),
+                                "blocked_by": self._short(raw.get("blocked_by")), "priority": self._short(raw.get("priority")),
+                                "project": self._short(raw.get("project")), "file": self._open_note(raw.get("file"))})
+            def trim(value):
+                if isinstance(value, str) or hasattr(value, "isoformat"):  # YAML dates must stay JSON-able
+                    return self._short(value)
+                if isinstance(value, list):
+                    return [trim(v) for v in value]
+                if isinstance(value, dict):
+                    return {k: self._open_note(v) if k == "file" else trim(v) for k, v in value.items()}
+                return value
+            self.state_value = {"last_updated": self._short(data.get("last_updated")), "ssl_certs": certs,
+                                "open_incidents": trim(_as_list(data.get("open_incidents"))), "pending": pending}
+            self.state_mtime = mtime
+            return self.state_value
 
     def connect(self):
         # closing(): sqlite3's own context manager only commits, it never closes
@@ -348,6 +422,8 @@ class Handler(BaseHTTPRequestHandler):
                     chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
                 body = {"ok": True, "chunks": chunks, "index_mtime": iso(app.db.stat().st_mtime), "root": str(app.root)}
                 status = 200
+            elif parsed.path == "/state":
+                body, status = app.state(), 200
             elif parsed.path == "/search":
                 query = args.get("q", [""])[0]
                 if len(query) < 2:
@@ -372,6 +448,8 @@ class Handler(BaseHTTPRequestHandler):
                 body, status = app.related(args.get("path", [""])[0], clamp(args.get("limit", [8])[0], 8, 1, 50)), 200
             else:
                 body, status = {"error": "not found"}, 404
+        except StateUnavailable as exc:
+            body, status = {"error": str(exc)}, 503
         except FileNotFoundError as exc:
             body, status = {"error": str(exc)}, 404
         except ValueError as exc:

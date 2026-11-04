@@ -11,9 +11,10 @@ const SCOPES = [
   ['apps', 'Apps', 'TrueNAS apps, dashboard cards, proxy names and the datasets they mount. Prefix: app:', 'App, proxy name or dataset…  e.g. plex, nextcloud, Media'],
   ['media', 'Media', 'Movies (Radarr), TV (Sonarr) and the watch ledger. Prefix: media:', 'A title…  e.g. Obsession'],
   ['aikb', 'Notes', 'The AIKB knowledge base: markdown notes, runbooks, decisions. Prefix: kb: or aikb:', 'Search notes…  e.g. zfs scrub, vaultwarden, plex transcode'],
+  ['ops', 'Ops', 'Firing alerts, expiring certificates, AIKB incidents and pending work. Prefix: ops: or alerts:', 'Search alerts, certificates and incidents…'],
 ]
-const PREFIX = /^\s*(host|hosts|h|app|apps|media|m|aikb|kb|notes)\s*:/i
-const PREFIX_SCOPE = { host: 'hosts', hosts: 'hosts', h: 'hosts', app: 'apps', apps: 'apps', media: 'media', m: 'media', aikb: 'aikb', kb: 'aikb', notes: 'aikb' }
+const PREFIX = /^\s*(host|hosts|h|app|apps|media|m|aikb|kb|notes|ops|alerts)\s*:/i
+const PREFIX_SCOPE = { host: 'hosts', hosts: 'hosts', h: 'hosts', app: 'apps', apps: 'apps', media: 'media', m: 'media', aikb: 'aikb', kb: 'aikb', notes: 'aikb', ops: 'ops', alerts: 'ops' }
 
 // Work Docket's Grid view (PivotGrid) pivots on work attributes (team, owner, cluster); left out until home has its own columns.
 const VIEWS = [['list', 'List', '☰'], ['graph', 'Graph', '◉']]
