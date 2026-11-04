@@ -153,7 +153,7 @@ class App:
         """The names each note mentions (hosts, IPs, files, tags; not free terms), for joining notes to the fleet."""
         paths = [p for p in dict.fromkeys(paths) if p.endswith(".md")][:25]
         if not paths:
-            return {"links": {}}
+            return {"links": {}, "titles": {}}
         marks = ",".join("?" * len(paths))
         found = {p: [] for p in paths}
         with self.connect() as conn:
@@ -163,7 +163,7 @@ class App:
                                                   GROUP BY c.file_path, e.id ORDER BY hits DESC""", paths):
                 if len(found[file_path]) < limit:
                     found[file_path].append({"name": name, "kind": kind, "hits": hits})
-        return {"links": found}
+        return {"links": found, "titles": {p: self.title(p) for p in found}}
 
 
 class Handler(BaseHTTPRequestHandler):

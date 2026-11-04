@@ -24,7 +24,7 @@ class GraphNotesTest(unittest.TestCase):
         if "/search?" in url:
             return {"results": [{"file": "ops/litestream.md", "title": "Litestream"}]}
         if "/links?" in url:
-            return {"links": {"ops/litestream.md": [{"name": "Babbage", "kind": "host"}, {"name": "10.10.10.50", "kind": "ip"},
+            return {"titles": {"ops/litestream.md": "Litestream backups"}, "links": {"ops/litestream.md": [{"name": "Babbage", "kind": "host"}, {"name": "10.10.10.50", "kind": "ip"},
                                                      {"name": "nothing-here", "kind": "tag"}]}}
         return {"notes": []}
 
@@ -55,6 +55,18 @@ class GraphNotesTest(unittest.TestCase):
         self.fleet()
         d = graph.build("", expand="n:ops/litestream.md")
         self.assertEqual(sorted(n["id"] for n in d["nodes"]), ["h:babbage", "h:turing", "n:ops/litestream.md"])
+        self.assertEqual([n["label"] for n in d["nodes"] if n["kind"] == "note"], ["Litestream backups"])
+
+    def test_expand_note_aikb_down(self):
+        self.fleet()
+        graph.fetch_local = lambda *a, **k: None
+        d = graph.build("", expand="n:ops/litestream.md")
+        self.assertEqual((d["nodes"], d["warnings"]), ([], ["AIKB is unreachable, so notes are left out"]))
+
+    def test_host_prefix_is_stripped(self):
+        self.fleet()
+        d = graph.build("host:turing")
+        self.assertIn("h:turing", d["seeds"])
 
     def test_shared_note_is_one_node(self):
         asked = []

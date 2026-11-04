@@ -21,7 +21,7 @@ also starts from the notes AIKB finds for it (/search), joined to the fleet node
 from collections import defaultdict
 from urllib.parse import quote, urlencode, urlsplit
 
-from . import fleet, routes
+from . import fleet, routes, search
 from .common import fetch_local, parallel, settle
 
 CAP = 400      # nodes per graph; `truncated` says when it bites
@@ -173,10 +173,10 @@ def _notes(ids, nodes):
 
 def _joins(files, nodes, F):
     """The fleet nodes each note names (host, app, card, proxy and DNS names by label; IPs by the host that has
-    them), as mention edges. None when AIKB is down."""
+    them), as mention edges, plus each note's title. (None, {}) when AIKB is down."""
     got = _aikb("/links", path=files, limit=80)
     if got is None:
-        return None
+        return None, {}
     by = defaultdict(list)
     for i, n in nodes.items():
         if n["kind"] in ("host", "app", "service", "proxy", "dns"):
@@ -187,20 +187,16 @@ def _joins(files, nodes, F):
             name = (e.get("name") or "").lower()
             ids = by.get(name) or (["h:" + F["ip_of"][name]] if e.get("kind") == "ip" and name in F["ip_of"] else [])
             edges += [_mention(i, "n:" + file) for i in ids if i in nodes]
-    return edges
-
-
-SCOPED = ("aikb:", "kb:", "notes:")
+    return edges, got.get("titles") or {}
 
 
 def build(q, expand=None, live=False):
     F = fleet.get()
     nodes, edges = _all(F, live=live)
     everything = not expand and q.strip() in ("*", "all")
-    text = q.strip()
-    notes_only = text.lower().startswith(SCOPED)
-    if notes_only:
-        text = text.split(":", 1)[1].strip()
+    # host:/app:/media:/kb: prefixes as the search bar has them; kb: starts from notes only
+    scope, text = search.parse_scope(q)
+    notes_only = scope == "aikb"
     if expand:
         keep = _around([expand], edges, 1) if expand in nodes else set()
         seeds = [expand]
@@ -218,21 +214,31 @@ def build(q, expand=None, live=False):
         # the fleet nodes they name; those join the graph on their own, without their neighborhoods
         found = {}
         if expand and expand.startswith("n:"):
-            found[expand] = _note(expand[2:])
+            found[expand] = _note(expand[2:])   # the viewer already has this node; the title comes from /links below
         elif not expand and len(text) >= 3:
             res = _aikb("/search", q=text, k=NOTE_SEEDS)
             if res is None:
                 warnings.append("AIKB is unreachable, so notes are left out")
             for r in (res or {}).get("results") or []:
                 found.setdefault("n:" + r["file"], dict(_note(r["file"], r.get("title")), result=True))
-        joins = _joins([i[2:] for i in found], nodes, F) if found else []
+        joins, titles = _joins([i[2:] for i in found], nodes, F) if found else ([], {})
         if joins is None:
-            warnings.append("AIKB is unreachable, so notes are left out")
+            # Nothing from AIKB: an expanded note must come back empty-handed, not as "no neighbors"
+            found = {}
+            if not warnings:
+                warnings.append("AIKB is unreachable, so notes are left out")
+        for nid in found:
+            if titles.get(nid[2:]):
+                found[nid]["label"] = titles[nid[2:]]
         for nid, n in found.items():
             out.setdefault(nid, dict(n, result=n.get("result", False)))
-        for e in joins or []:
+        joins = joins or []
+        for e in joins:
+            if e["a"] not in out and len(out) >= CAP:
+                truncated = True
+                continue
             out.setdefault(e["a"], dict(nodes[e["a"]], result=False))
-        out_edges += joins or []
+        out_edges += [e for e in joins if e["a"] in out]
         seeds += [i for i in found if i not in seeds]
         notes, note_edges = _notes([s for s in seeds if s in keep], nodes)
         if notes is None:
