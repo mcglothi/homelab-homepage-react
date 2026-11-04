@@ -15,13 +15,14 @@ import { useAppearance } from './hooks/useAppearance'
 import { Toaster } from './ui/primitives'
 import { Nav } from './components/TopBar/Nav'
 import AikbView from './views/Aikb/AikbView'
+import NoteView from './views/Aikb/NoteView'
 import WatchView from './views/Watch/WatchView'
 import HaView from './views/HomeAssistant/HaView'
 import UsageView from './views/Usage/UsageView'
 import { ViewShell } from './views/bits'
 
-const VIEWS = { '/aikb': AikbView, '/usage': UsageView, '/watch': WatchView, '/ha': HaView }
-const TITLES = { '/': 'Docket', '/aikb': 'AIKB · Docket', '/usage': 'AI Usage · Docket', '/watch': 'Watch · Docket', '/ha': 'HA · Docket' }
+const VIEWS = { '/aikb': AikbView, '/aikb/note': NoteView, '/usage': UsageView, '/watch': WatchView, '/ha': HaView }
+const TITLES = { '/': 'Docket', '/aikb': 'AIKB · Docket', '/aikb/note': 'AIKB note · Docket', '/usage': 'AI Usage · Docket', '/watch': 'Watch · Docket', '/ha': 'HA · Docket' }
 
 
 // Map live API data to per-service detail overrides, plus each card's probe result

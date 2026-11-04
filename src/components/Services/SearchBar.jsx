@@ -10,9 +10,10 @@ const SCOPES = [
   ['hosts', 'Hosts', 'Machines by name or IP: TrueNAS, VMs, AdGuard DNS names, Prometheus targets and alerts. Prefix: host:', 'Hostname or IP…  e.g. babbage, turing, 10.10.10.50'],
   ['apps', 'Apps', 'TrueNAS apps, dashboard cards, proxy names and the datasets they mount. Prefix: app:', 'App, proxy name or dataset…  e.g. plex, nextcloud, Media'],
   ['media', 'Media', 'Movies (Radarr), TV (Sonarr) and the watch ledger. Prefix: media:', 'A title…  e.g. Obsession'],
+  ['aikb', 'Notes', 'The AIKB knowledge base: markdown notes, runbooks, decisions. Prefix: kb: or aikb:', 'Search notes…  e.g. zfs scrub, vaultwarden, plex transcode'],
 ]
-const PREFIX = /^\s*(host|hosts|h|app|apps|media|m)\s*:/i
-const PREFIX_SCOPE = { host: 'hosts', hosts: 'hosts', h: 'hosts', app: 'apps', apps: 'apps', media: 'media', m: 'media' }
+const PREFIX = /^\s*(host|hosts|h|app|apps|media|m|aikb|kb|notes)\s*:/i
+const PREFIX_SCOPE = { host: 'hosts', hosts: 'hosts', h: 'hosts', app: 'apps', apps: 'apps', media: 'media', m: 'media', aikb: 'aikb', kb: 'aikb', notes: 'aikb' }
 
 // Work Docket's Grid view (PivotGrid) pivots on work attributes (team, owner, cluster); left out until home has its own columns.
 const VIEWS = [['list', 'List', '☰'], ['graph', 'Graph', '◉']]

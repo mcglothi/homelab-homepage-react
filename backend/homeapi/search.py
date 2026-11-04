@@ -5,10 +5,10 @@ Same contract as the work Docket's search (its front end runs unchanged on it).
          safe on every keystroke.
   full — fast plus live lookups chosen by what the query looks like (kind_of):
            host / ip → Prometheus targets and firing alerts on it
-           anything  → Radarr movies, Sonarr series, the watch ledger
+           anything  → Radarr movies, Sonarr series, the watch ledger, AIKB notes
 Each live source fails on its own: an error becomes a note, never a blank result.
 
-Groups: {source, title, items: [{title, subtitle, detail?, href?, search?, status?}]}.
+Groups: {source, title, items: [{title, subtitle, detail?, href?, search?, status?, children?}]}.
 """
 
 import re
@@ -20,11 +20,11 @@ from . import fleet, routes
 from .common import Cached, fetch_local, js_quote
 
 PER_GROUP = 25
-SCOPE_PREFIX = re.compile(r"^(host|hosts|h|app|apps|media|m)\s*:\s*(.*)$", re.I)
-SCOPE_OF = {"host": "hosts", "hosts": "hosts", "h": "hosts", "app": "apps", "apps": "apps", "media": "media", "m": "media"}
+SCOPE_PREFIX = re.compile(r"^(host|hosts|h|app|apps|media|m|aikb|kb|notes)\s*:\s*(.*)$", re.I)
+SCOPE_OF = {"host": "hosts", "hosts": "hosts", "h": "hosts", "app": "apps", "apps": "apps", "media": "media", "m": "media", "aikb": "aikb", "kb": "aikb", "notes": "aikb"}
 SCOPE_TAGS = {"hosts": {"host", "dns", "network", "vm", "servers"}, "apps": {"app", "service", "proxy", "dataset"},
-              "media": {"media", "watch"}}
-SCOPE_SOURCES = {"hosts": {"Prometheus"}, "apps": {"Prometheus"}, "media": {"Radarr", "Sonarr", "Watch"}}
+              "media": {"media", "watch"}, "aikb": {"aikb"}}
+SCOPE_SOURCES = {"hosts": {"Prometheus"}, "apps": {"Prometheus"}, "media": {"Radarr", "Sonarr", "Watch"}, "aikb": {"AIKB"}}
 
 
 def kind_of(q):
@@ -155,13 +155,30 @@ def _watch(q):
     return {"source": "watch", "title": "Watched videos", "items": items[:PER_GROUP]} if items else None
 
 
+def _aikb(q):
+    rows = (fetch_local("%s/search?q=%s&k=10" % (routes.AIKB_SEARCH_URL(), js_quote(q)), timeout=15) or {}).get("results") or []
+    items = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        title, section = r.get("title") or r.get("file") or "Untitled", r.get("section") or "overview"
+        detail = re.sub(r"\s+", " ", re.sub(r"^\s*#{1,6}\s*", "", r.get("excerpt") or "")).strip()
+        children = [{"title": e.get("name"), "subtitle": "host"} for e in (r.get("entities") or [])
+                    if isinstance(e, dict) and e.get("kind") == "host" and e.get("name")][:4]
+        items.append({"title": title if section == "overview" else "%s · %s" % (title, section),
+                      "subtitle": " · ".join(filter(None, [r.get("file"), r.get("date")])), "detail": detail,
+                      "href": "/aikb/note?path=%s&section=%s" % (js_quote(r.get("file") or ""), js_quote(section)),
+                      "internal": True, **({"children": children} if children else {})})
+    return {"source": "aikb", "title": "AIKB notes", "items": items} if items else None
+
+
 def plan(q):
     kind = kind_of(q)
     sources = []
     if kind in ("host", "ip", "app"):
         sources.append(("Prometheus", lambda: _prometheus(q)))
     if len(q) >= 3:
-        sources += [("Radarr", lambda: _radarr(q)), ("Sonarr", lambda: _sonarr(q)), ("Watch", lambda: _watch(q))]
+        sources += [("Radarr", lambda: _radarr(q)), ("Sonarr", lambda: _sonarr(q)), ("Watch", lambda: _watch(q)), ("AIKB", lambda: _aikb(q))]
     resolved = fleet.short(q) if kind == "host" else None
     return kind, resolved, sources
 

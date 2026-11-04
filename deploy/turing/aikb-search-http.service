@@ -1,0 +1,13 @@
+[Unit]
+Description=AIKB read-only search API for the homepage dashboard (:8793)
+After=network-online.target
+
+[Service]
+Environment=AIKB_ROOT=%h/code/AIKB
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=%h/code/AIKB/_tools/aikb-search/.venv/bin/python -I %h/.local/share/aikb-search-http/aikb_search_http.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

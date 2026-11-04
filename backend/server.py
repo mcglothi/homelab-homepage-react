@@ -76,7 +76,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"error": str(e) or type(e).__name__}, HTTPStatus.BAD_GATEWAY)
         self._send_json(data if data is not None else {"error": "no data"})
 
-    def _passthrough(self, path, base, timeout):
+    def _passthrough(self, path, base, timeout, upstream_path=None):
         if not base:
             name = "USAGE_URL" if path.startswith("/api/usage/") else "upstream"
             return self._send_json({"error": "%s not configured" % name}, HTTPStatus.SERVICE_UNAVAILABLE)
@@ -85,7 +85,7 @@ class Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(n) if n else None
         try:
-            res = request(base.rstrip("/") + self.path, method=self.command, body=body, timeout=timeout,
+            res = request(base.rstrip("/") + (upstream_path or self.path), method=self.command, body=body, timeout=timeout,
                           headers={"accept": "application/json"})
         except Exception as e:  # noqa: BLE001
             return self._send_json({"error": str(e)}, HTTPStatus.BAD_GATEWAY)
@@ -124,6 +124,10 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith(prefix) and self.command in methods:
                 return self._passthrough(path, base(), timeout)
         if self.command in ("GET", "HEAD"):
+            if path in ("/api/kb/note", "/api/kb/mentions") and self.command == "GET":
+                upstream = "/" + path.rsplit("/", 1)[1]
+                query = urlsplit(self.path).query
+                return self._passthrough(path, routes.AIKB_SEARCH_URL(), 15, upstream + ("?" + query if query else ""))
             if path in routes.GET:
                 return self._api(routes.GET[path])
             q = self._query()
