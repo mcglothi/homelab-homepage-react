@@ -12,6 +12,9 @@
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
       html, body, #root { height: 100%; }
+      /* The graph (components/Graph/theme.js) reads its colors from these; keep in step with C in src/ui/theme.js */
+      :root { --bg: #080808; --panel: #111115; --text: #e8e8e8; --muted: #8a8a8a; --dim: #555555; --faint: #333333; --line: #ffffff17;
+              --blue: #2979ff; --cyan: #00fff7; --green: #39ff5a; --amber: #ffab00; --orange: #ff7a1a; --red: #ff4d4f; --violet: #bf5fff; --accent: #ff2d6b; }
       body {
         background: #080808;
         font-family: 'Space Grotesk', sans-serif;

@@ -12,7 +12,18 @@ export const C = {
   // Surfaces, darkest to lightest: page < field < card < card hover.
   field: '#0b0b0e', panel: '#111115', panel2: '#17171c',
   green: '#39ff5a', amber: '#ffab00', red: '#ff4d4f', violet: '#bf5fff', blue: '#2979ff', cyan: '#00fff7',
+  // Used by the search and graph components ported from work Docket
+  bright: '#ffffff', bg: '#080808', orange: '#ff7a1a', accent: '#ff2d6b',
 }
+
+// A color at partial opacity. `a` is a two-digit hex alpha ('40') or 0..1.
+export function alpha(color, a) {
+  const f = typeof a === 'string' ? parseInt(a, 16) / 255 : a
+  return `color-mix(in srgb, ${color} ${+(f * 100).toFixed(1)}%, transparent)`
+}
+
+// A colored glow at partial opacity (work Docket scales it by --glow-k; home has no such setting).
+export const glow = alpha
 
 // Alert levels from the Turing feeds → colours.
 export const LEVEL = { crit: C.red, warn: C.amber, info: C.blue, ok: C.green }

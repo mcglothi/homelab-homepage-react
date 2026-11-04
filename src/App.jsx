@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useWindowSize } from './hooks/useWindowSize'
 import { TopBar } from './components/TopBar/TopBar'
 import { SearchBar } from './components/Services/SearchBar'
+import { UniversalResults, matchCount, useUniversalSearch, useView } from './components/Search/UniversalResults'
 import { GroupSection } from './components/Services/GroupSection'
 import { ServiceCard } from './components/Services/ServiceCard'
 import { Sidebar } from './components/Sidebar/Sidebar'
@@ -74,7 +75,16 @@ export default function App() {
   const showSidebar = w >= 1024
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [query, setQuery] = useState('')
+  // ?q= opens with a search filled in, so a search can be linked or bookmarked
+  const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
+  const [scope, setScope] = useState(() => { try { return localStorage.getItem('docket.search.scope') || 'all' } catch { return 'all' } })
+  const pickScope = v => { setScope(v); try { localStorage.setItem('docket.search.scope', v) } catch { /* not saved */ } }
+  const search = useUniversalSearch(query, scope)
+  const chain = useRef(new Set())
+  const [view, pickView] = useView(search.q, chain)
+  // "Search for this" in the graph: a real search, and the page stays in Graph view along the chain of such searches
+  const graphSearch = text => { chain.current.add(search.q); chain.current.add(text); setQuery(text) }
+  const matches = matchCount(search)
   const [tweaksOpen, setTweaksOpen] = useState(false)
 
   // Persisted preferences
@@ -177,8 +187,10 @@ export default function App() {
         {/* Main content */}
         <div style={{ flex: 1, overflowY: 'auto', padding: mainPad }}>
           <div style={{ marginBottom: isMobile ? 16 : 28, display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{ flex: 1 }}>
-              <SearchBar query={query} setQuery={setQuery} resultCount={filtered?.length ?? 0} accent={accent} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <SearchBar query={query} setQuery={setQuery} scope={scope} setScope={pickScope}
+                matches={{ ...matches, count: matches.count + (filtered?.length ?? 0) }}
+                accent={accent} view={search.q ? view : null} setView={pickView} />
             </div>
             <button
               onClick={() => setTweaksOpen(o => !o)}
@@ -264,6 +276,8 @@ export default function App() {
               </div>
             </div>
           )}
+
+          <UniversalResults search={search} setQuery={setQuery} accent={accent} view={view} pickView={pickView} graphSearch={graphSearch} />
 
           {filtered ? (
             <div>
