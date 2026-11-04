@@ -317,19 +317,22 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
     if (!raw) return null
     // Concepts are one kind (weighted low as 'found'), so any per-kind cap folds most of them; the facade already caps at 60
     const base = capGroups(raw, raw?.lens === 'concepts' ? Infinity : S.cap, wOf, revealed, boost, { windowDays: S.window, halfLife: S.halfLife })
-    let nodes = base.nodes.filter(n => n.result || on(n.kind))
+    // a path's middle hops are the answer too: filters and Hide top hubs must not cut the route
+    const onRoute = new Set((raw?.path?.routes || []).flatMap(r => r.ids))
+    const kept = n => n.result || onRoute.has(n.id)
+    let nodes = base.nodes.filter(n => kept(n) || on(n.kind))
     const ids = new Set(nodes.map(n => n.id))
     let edges = base.edges.filter(e => ids.has(e.a) && ids.has(e.b))
     if (S.minLinks > 0) {   // "show nodes with at least N links": hides the loosely attached
       const d = {}
       edges.forEach(e => { d[e.a] = (d[e.a] || 0) + 1; d[e.b] = (d[e.b] || 0) + 1 })
-      nodes = nodes.filter(n => n.result || (d[n.id] || 0) >= S.minLinks)
+      nodes = nodes.filter(n => kept(n) || (d[n.id] || 0) >= S.minLinks)
       const ok = new Set(nodes.map(n => n.id))
       edges = edges.filter(e => ok.has(e.a) && ok.has(e.b))
     }
     let ms = metrics(nodes, edges, S.size)
     if (S.hideHubs) {   // "reveal the underlying ideas": take the three most influential nodes away to see what they were holding together
-      const hubs = new Set(ms.filter(n => !n.result).sort((a, b) => b.bc - a.bc).slice(0, 3).map(n => n.id))
+      const hubs = new Set(ms.filter(n => !kept(n)).sort((a, b) => b.bc - a.bc).slice(0, 3).map(n => n.id))
       nodes = nodes.filter(n => !hubs.has(n.id))
       edges = edges.filter(e => !hubs.has(e.a) && !hubs.has(e.b))
       ms = metrics(nodes, edges, S.size)
@@ -956,7 +959,8 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
 
       {empty && (
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, right: 0, display: 'grid', placeItems: 'center', color: C.muted, fontFamily: MONO, fontSize: 12, textAlign: 'center', padding: 24, pointerEvents: 'none' }}>
-          Nothing in the CMDB, AD or network mirrors matches “{rootEntry.q}”. Try a host, person, team, cluster, pool, subnet or software name.
+          {raw?.warnings?.length ? raw.warnings.join(' · ')   // "no path within 6 hops", "no earlier snapshot yet", …
+            : <>Nothing in the fleet or AIKB matches “{rootEntry.q}”. Try a host, app, dataset, proxy name or note.</>}
         </div>
       )}
       {help && <HelpOverlay onClose={() => setHelp(false)} />}

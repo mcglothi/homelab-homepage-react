@@ -152,3 +152,20 @@ test('media seeds order the Media facet first; Prometheus targets stay fleet', (
   for (const id of ['yt:a1', 'ch:nodus labs', 'tt:50', 'u:1']) assert.equal(initialOrder(id)[0], 'media', id)
   assert.notEqual(initialOrder('t:node|10.0.0.2:9100')[0], 'media')
 })
+
+test('modularity counts only links inside the node set and never returns NaN', () => {
+  const nodes = [{ id: 'a', comm: 0 }, { id: 'b', comm: 0 }, { id: 'c', comm: 1 }, { id: 'd', comm: 1 }]
+  const inside = [{ a: 'a', b: 'b' }, { a: 'c', b: 'd' }]
+  assert.equal(modularity(nodes, [{ a: 'a', b: 'gone' }, { a: 'x', b: 'y' }]), 0)
+  assert.equal(modularity(nodes, [...inside, { a: 'a', b: 'gone' }, { a: 'c', b: 'c' }]), modularity(nodes, inside))
+})
+
+test('surprising picks hubs among real bridges only', () => {
+  // one real hub; the fold bubble and bc-0 nodes must not take the other hub slots
+  const nodes = [
+    { id: 'hub', kind: 'host', comm: 0, bc: 9 }, { id: 'more', kind: 'app', comm: 1, bc: 50, fold: { total: 9 } },
+    { id: 'a', kind: 'host', comm: 0, bc: 0 }, { id: 'b', kind: 'app', comm: 1, bc: 0 },
+  ]
+  const edges = [{ a: 'hub', b: 'b', label: 'hub link' }, { a: 'a', b: 'b', label: 'plain' }]
+  assert.deepEqual(surprising(nodes, edges).map(x => x.label), ['plain'])
+})
