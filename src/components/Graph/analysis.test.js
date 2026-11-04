@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { capGroups, rankGroup, recScore, decay, foldSummary, agoText, isDated } from './analysis.js'
+import { capGroups, rankGroup, recScore, decay, foldSummary, agoText, isDated, diversity, modularity } from './analysis.js'
 
 const NOW = Date.parse('2026-11-04T12:00:00Z')
 const DAY = 86400000
@@ -108,4 +108,12 @@ test('helpers', () => {
   assert.equal(agoText(800), '2 years')
   assert.ok(isDated(host('x', 1)) && !isDated(host('y', null)))
   assert.equal(foldSummary([host('u', null)], NOW), '1 undated')
+})
+
+test('diversity describes the current Louvain communities', () => {
+  const nodes = [{ id: 'a', comm: 0 }, { id: 'b', comm: 0 }, { id: 'c', comm: 1 }, { id: 'd', comm: 1 }]
+  const edges = [{ a: 'a', b: 'b' }, { a: 'c', b: 'd' }]
+  assert.ok(modularity(nodes, edges) > 0)
+  assert.equal(diversity(nodes, edges).label, 'diversified')
+  assert.equal(diversity([{ id: 'a', comm: 0 }, { id: 'b', comm: 0 }, { id: 'c', comm: 1 }], edges).label, 'biased')
 })

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Small, read-only HTTP facade for AIKB search."""
 import json
+import math
 import os
 import sqlite3
 import sys
 import threading
 import time
+import re
 from contextlib import closing
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,6 +16,8 @@ from urllib.parse import parse_qs, urlsplit
 
 
 DEFAULT_ROOT = "/home/mcglothi/code/AIKB"
+VIDEOS = "media/youtube/"
+# Concept SQL also skips generic filenames (readme, index, changelog, ...): the indexer records them as "file" entities
 
 
 def iso(timestamp):
@@ -148,6 +152,158 @@ class App:
                 "notes": [{"file": file_path, "section": section, "title": self.title(file_path), "hits": hits}
                           for file_path, section, _, hits in rows]}
 
+    @staticmethod
+    def _note_where(alias="c"):
+        return (f"{alias}.file_path LIKE '%.md' AND substr({alias}.file_path, 1, 9) != '_runtime/' "
+                f"AND {alias}.file_path NOT LIKE '.%' AND {alias}.file_path NOT LIKE '%/.%'")
+
+    def _search_files(self, query, count):
+        """One search hit per openable note, preserving hybrid-search ranking."""
+        with self.search_lock:
+            results = self.search_fn(query, top_k=count * 4, use_usage_stats=True)
+        files = []
+        for row in results:
+            path = row.get("file", "")
+            if (path.endswith(".md") and not path.startswith("_runtime/") and not path.startswith(".")
+                    and "/." not in path and path not in files):
+                files.append(path)
+        return files[:count]
+
+    def concepts(self, query, notes, limit, videos=False):
+        """Small co-occurrence graph over meaningful, indexed note entities. YouTube notes (media/youtube/) only
+        with videos: there are enough of them that "watch" and "youtube" otherwise lead every graph."""
+        all_notes = not query.strip() or query.strip().lower() in ("*", "all")
+        files = [] if all_notes else [f for f in self._search_files(query, notes * (1 if videos else 3))
+                                      if videos or not f.startswith(VIDEOS)][:notes]
+        clause, values = self._note_where("c"), []
+        if not videos:
+            clause += " AND substr(c.file_path, 1, %d) != '%s'" % (len(VIDEOS), VIDEOS)
+        if files:
+            clause += " AND c.file_path IN (%s)" % ",".join("?" * len(files))
+            values = files
+        elif not all_notes:
+            return {"q": query, "chunks": 0, "notes": [], "concepts": [], "edges": []}
+        with self.connect() as conn:
+            chunks = conn.execute("SELECT COUNT(*) FROM chunks c WHERE " + clause, values).fetchone()[0]
+            if all_notes:
+                files = [r[0] for r in conn.execute("SELECT DISTINCT c.file_path FROM chunks c WHERE " + clause + " ORDER BY c.file_path", values)]
+            rows = conn.execute("""SELECT e.id, e.name, e.kind, COUNT(DISTINCT c.id), COUNT(DISTINCT c.file_path)
+                                 FROM chunks c JOIN entity_chunks ec ON ec.chunk_id=c.id JOIN entities e ON e.id=ec.entity_id
+                                 WHERE %s AND e.kind IN ('tag', 'host', 'file') AND lower(e.name) NOT IN ('readme', 'index', '_index', 'changelog', 'todo', 'license')
+                                 GROUP BY e.id ORDER BY COUNT(DISTINCT c.id) DESC, lower(e.name), e.kind""" % clause, values).fetchall()
+            if all_notes:
+                rows = [r for r in rows if r[3] >= 3]
+            rows = rows[:limit]
+            ids = [r[0] for r in rows]
+            pairs = []
+            if ids:
+                marks = ",".join("?" * len(ids))
+                pairs = conn.execute("""SELECT e1.id, e2.id, COUNT(DISTINCT c.id)
+                                        FROM chunks c JOIN entity_chunks x ON x.chunk_id=c.id
+                                        JOIN entity_chunks y ON y.chunk_id=c.id AND x.entity_id < y.entity_id
+                                        JOIN entities e1 ON e1.id=x.entity_id JOIN entities e2 ON e2.id=y.entity_id
+                                        WHERE %s AND x.entity_id IN (%s) AND y.entity_id IN (%s)
+                                        GROUP BY e1.id, e2.id""" % (clause, marks, marks), values + ids + ids).fetchall()
+        kept = {r[0]: r for r in rows}
+        best = {}
+        for a, b, weight in pairs:
+            if chunks > 200 and weight < 2:
+                continue
+            best.setdefault(a, []).append((weight, b))
+            best.setdefault(b, []).append((weight, a))
+        allow = {tuple(sorted((a, b))) for a, links in best.items() for _, b in sorted(links, reverse=True)[:8]}
+        return {"q": query, "chunks": chunks,
+                "notes": files if not all_notes else [],
+                "concepts": [{"name": r[1], "kind": r[2], "count": r[3], "notes": r[4]} for r in rows],
+                "edges": [{"a": kept[a][1], "b": kept[b][1], "w": w} for a, b, w in pairs
+                          if tuple(sorted((a, b))) in allow and not (chunks > 200 and w < 2)]}
+
+    def context(self, name, query, limit):
+        # The graph's search as typed: drop a scope prefix (kb:, host:) and treat * / all as every note
+        query = re.sub(r"^\s*(aikb|kb|notes|hosts?|h|apps?|media|m)\s*:", "", query or "", flags=re.I).strip()
+        if query.lower() in ("*", "all"):
+            query = ""
+        files = self._search_files(query, max(limit, 8)) if query else []
+        clause, values = self._note_where("c"), [name]
+        if query and not files:
+            return {"name": name, "items": []}
+        if files:
+            clause += " AND c.file_path IN (%s)" % ",".join("?" * len(files))
+            values += files
+        with self.connect() as conn:
+            rows = conn.execute("""SELECT c.file_path, c.section, c.content
+                                 FROM chunks c JOIN entity_chunks ec ON ec.chunk_id=c.id JOIN entities e ON e.id=ec.entity_id
+                                 WHERE lower(e.name)=lower(?) AND e.kind IN ('tag', 'host', 'file') AND lower(e.name) NOT IN ('readme', 'index', '_index', 'changelog', 'todo', 'license') AND %s
+                                 GROUP BY c.file_path ORDER BY c.mtime DESC LIMIT ?""" % clause, values + [limit]).fetchall()
+        needle = name.lower()
+        def excerpt(content):
+            at = content.lower().find(needle)
+            start = max(0, at - 90) if at >= 0 else 0
+            return content[start:start + 280]
+        return {"name": name, "items": [{"file": path, "section": section, "title": self.title(path), "excerpt": excerpt(content)}
+                                        for path, section, content in rows]}
+
+    def related(self, relative, limit):
+        source = self.note(relative)  # exactly the note endpoint's validation
+        with self.connect() as conn:
+            target = conn.execute("""SELECT DISTINCT e.id, e.name FROM chunks c JOIN entity_chunks ec ON ec.chunk_id=c.id
+                                   JOIN entities e ON e.id=ec.entity_id WHERE c.file_path=? AND e.kind IN ('tag', 'host', 'file') AND lower(e.name) NOT IN ('readme', 'index', '_index', 'changelog', 'todo', 'license')""",
+                                  (relative,)).fetchall()
+            if not target:
+                return {"path": relative, "items": []}
+            ids = [r[0] for r in target]
+            marks = ",".join("?" * len(ids))
+            shared = conn.execute("""SELECT c.file_path, e.id, e.name FROM chunks c JOIN entity_chunks ec ON ec.chunk_id=c.id
+                                  JOIN entities e ON e.id=ec.entity_id WHERE %s AND c.file_path != ? AND e.id IN (%s)
+                                  GROUP BY c.file_path, e.id""" % (self._note_where("c"), marks), [relative] + ids).fetchall()
+            by_file = {}
+            for path, entity_id, name in shared:
+                by_file.setdefault(path, {})[entity_id] = name
+            paths = list(by_file)
+            all_sets = {p: set(names) for p, names in by_file.items()}
+            if paths:
+                marks = ",".join("?" * len(paths))
+                rows = conn.execute("""SELECT c.file_path, e.id FROM chunks c JOIN entity_chunks ec ON ec.chunk_id=c.id
+                                     JOIN entities e ON e.id=ec.entity_id WHERE c.file_path IN (%s) AND e.kind IN ('tag', 'host', 'file') AND lower(e.name) NOT IN ('readme', 'index', '_index', 'changelog', 'todo', 'license')
+                                     GROUP BY c.file_path, e.id""" % marks, paths).fetchall()
+                for path, entity_id in rows:
+                    all_sets.setdefault(path, set()).add(entity_id)
+            # Rare concepts count for more (IDF): sharing docker and truenas says little, sharing litestream a lot
+            union = {r[0] for r in target}.union(*all_sets.values())
+            marks = ",".join("?" * len(union))
+            df = dict(conn.execute("""SELECT ec.entity_id, COUNT(DISTINCT c.file_path) FROM entity_chunks ec
+                                      JOIN chunks c ON c.id=ec.chunk_id WHERE ec.entity_id IN (%s)
+                                      GROUP BY ec.entity_id""" % marks, list(union)).fetchall())
+            files = conn.execute("SELECT COUNT(DISTINCT file_path) FROM chunks").fetchone()[0] or 1
+        idf = lambda i: math.log(1 + files / (df.get(i) or 1))
+        target_ids = {r[0] for r in target}
+        scored = []
+        for path, names in by_file.items():
+            if len(names) < 2:
+                continue
+            score = sum(map(idf, names)) / sum(map(idf, target_ids | all_sets[path]))
+            # Shared names rarest first, so the row shows why it's related
+            scored.append((score, path, [names[i] for i in sorted(names, key=idf, reverse=True)]))
+        scored.sort(key=lambda r: (-r[0], r[1]))
+        def linked(text, other):
+            # Whole names only: "nas" must not match a link to truenas.md
+            choices = {other.lower(), Path(other).name.lower(), Path(other).stem.lower()}
+            for pair in re.findall(r"\]\(([^)]*)\)|\[\[([^]]*)\]\]", text.lower()):
+                for d in pair:
+                    d = re.split(r"[#|]", d.strip(), 1)[0].strip()
+                    if d and (d in choices or any(d.endswith("/" + t) for t in choices)):
+                        return True
+            return False
+        items = []
+        for score, path, names in scored[:limit]:
+            try:
+                content = self.note(path)["content"]
+            except (OSError, ValueError, FileNotFoundError):
+                continue
+            items.append({"file": path, "title": self.title(path), "shared": names[:6],
+                          "score": round(score, 4), "linked": linked(source["content"], path) or linked(content, relative)})
+        return {"path": relative, "items": items}
+
 
     def links(self, paths, limit):
         """The names each note mentions (hosts, IPs, files, tags; not free terms), for joining notes to the fleet."""
@@ -206,6 +362,14 @@ class Handler(BaseHTTPRequestHandler):
                 body, status = app.links(args.get("path", []), clamp(args.get("limit", [80])[0], 80, 1, 300)), 200
             elif parsed.path == "/mentions":
                 body, status = app.mentions(args.get("name", [""])[0], clamp(args.get("limit", [20])[0], 20, 1, 50)), 200
+            elif parsed.path == "/concepts":
+                body, status = app.concepts(args.get("q", [""])[0], clamp(args.get("notes", [15])[0], 15, 1, 40),
+                                            clamp(args.get("limit", [60])[0], 60, 5, 150), args.get("videos", ["0"])[0] == "1"), 200
+            elif parsed.path == "/context":
+                body, status = app.context(args.get("name", [""])[0], args.get("q", [""])[0],
+                                           clamp(args.get("limit", [8])[0], 8, 1, 50)), 200
+            elif parsed.path == "/related":
+                body, status = app.related(args.get("path", [""])[0], clamp(args.get("limit", [8])[0], 8, 1, 50)), 200
             else:
                 body, status = {"error": "not found"}, 404
         except FileNotFoundError as exc:

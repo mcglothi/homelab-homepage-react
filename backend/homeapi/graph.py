@@ -19,10 +19,12 @@ also starts from the notes AIKB finds for it (/search), joined to the fleet node
 """
 
 from collections import defaultdict
+import json
+import re
 from urllib.parse import quote, urlencode, urlsplit
 
 from . import fleet, routes, search
-from .common import fetch_local, parallel, settle
+from .common import fetch_local, parallel, request, settle
 
 CAP = 400      # nodes per graph; `truncated` says when it bites
 DEPTH = 2      # hops from the start nodes
@@ -190,8 +192,50 @@ def _joins(files, nodes, F):
     return edges, got.get("titles") or {}
 
 
-def build(q, expand=None, live=False):
+def _concept_graph(q, expand, F, videos=False):
+    """An AIKB entity co-occurrence lens; it deliberately never expands into fleet topology."""
+    if expand:
+        return {"q": q, "lens": "concepts", "nodes": [], "edges": [], "seeds": [], "listed": [], "matched": 0,
+                "resolved": None, "truncated": False, "coverage": {"list": 0, "covered": 0, "nodes": 0, "groups": []}, "warnings": []}
+    _, text = search.parse_scope(q)
+    got = _aikb("/concepts", q=text, videos=int(bool(videos)))
+    if got is None:
+        return {"q": q, "lens": "concepts", "nodes": [], "edges": [], "seeds": [], "listed": [], "matched": 0,
+                "resolved": None, "truncated": False, "coverage": {"list": 0, "covered": 0, "nodes": 0, "groups": []},
+                "warnings": ["AIKB is unreachable, so concepts are left out"]}
+    fleet_nodes, _ = _all(F)
+    fleet_labels = {n["label"].lower() for n in fleet_nodes.values() if n["kind"] in ("host", "app", "service")}
+    nodes = []
+    by_name = {}
+    for item in got.get("concepts") or []:
+        name = item.get("name") or ""
+        ident = "c:" + name.lower()
+        node = {"id": ident, "kind": "concept", "label": name,
+                "sub": "%s · %s chunks · %s notes" % (item.get("kind"), item.get("count", 0), item.get("notes", 0)),
+                "attrs": [["Mentioned in", "%s chunks in %s notes" % (item.get("count", 0), item.get("notes", 0))], ["Kind", item.get("kind")]]}
+        if name.lower() in fleet_labels:
+            node["attrs"].append(["Also in the fleet", name])
+        nodes.append(node)
+        by_name[name.lower()] = node
+    words = set() if text.strip().lower() in ("*", "all") else set(re.findall(r"[\w-]{3,}", text.lower()))
+    seeds = [n["id"] for n in nodes if any(word in n["label"].lower() for word in words)]
+    if not seeds:
+        counts = {str(x.get("name", "")).lower(): x.get("count", 0) for x in got.get("concepts") or []}
+        seeds = [n["id"] for n in sorted(nodes, key=lambda n: (-counts.get(n["label"].lower(), 0), n["label"].lower()))[:5]]
+    edges = []
+    for edge in got.get("edges") or []:
+        a, b = by_name.get(str(edge.get("a", "")).lower()), by_name.get(str(edge.get("b", "")).lower())
+        if a and b:
+            edges.append({"a": a["id"], "b": b["id"], "kind": "cooccur", "label": "appear together", "detail": "in %s chunks" % edge.get("w", 0), "via": "AIKB", "flag": None, "w": edge.get("w", 0)})
+    return {"q": q, "lens": "concepts", "nodes": [dict(n, result=n["id"] in seeds) for n in nodes], "edges": edges,
+            "seeds": seeds, "listed": seeds, "matched": len(seeds), "resolved": None, "truncated": False,
+            "coverage": {"list": len(seeds), "covered": len(seeds), "nodes": len(seeds), "groups": []}, "warnings": []}
+
+
+def build(q, expand=None, live=False, lens=None, videos=False):
     F = fleet.get()
+    if lens == "concepts":
+        return _concept_graph(q, expand, F, videos)
     nodes, edges = _all(F, live=live)
     everything = not expand and q.strip() in ("*", "all")
     # host:/app:/media:/kb: prefixes as the search bar has them; kb: starts from notes only
@@ -254,3 +298,87 @@ def build(q, expand=None, live=False):
     return {"q": q, "nodes": list(out.values()), "edges": out_edges, "seeds": seeds[:50], "listed": seeds, "matched": len(seeds),
             "resolved": nodes[hosts[0]]["label"] if len(hosts) == 1 else None, "truncated": truncated,
             "coverage": {"list": len(seeds), "covered": len(seeds), "nodes": len(seeds), "groups": []}, "warnings": warnings}
+
+
+# ── "Explain this graph": on request only ─────────────────────────────────────
+
+EXPLAIN_SYSTEM = ("You are a home-lab infrastructure analyst. Use only the facts given about hosts, apps, datasets, "
+                  "proxy and DNS names, AIKB notes and concepts. Never invent names, hosts or numbers. Plain, short sentences.")
+EXPLAIN_PROMPT = """Below are relationships from a home-lab graph. Each line reads "A --relation--> B".
+
+{summary}
+
+Start directly with findings. Do not describe the page, graph, node counts or interface. Write exactly these three short parts:
+How it fits together: 3 to 6 bullets tracing useful relationships.
+Needs attention: only conflicts, missing links or weak spots present in the data.
+Look at next: 2 or 3 concrete checks or note ideas, each naming the thing to check.
+About 250 words at most."""
+BRIDGE_PROMPT = """These are two weakly connected topics in Tim's home-lab notes.
+
+Topic A: {a}
+Topic B: {b}
+
+Using only these names, write exactly 3 short research questions or AIKB note ideas that could connect the topics. No preamble."""
+
+
+def _explain_text(summary):
+    """Readable, bounded relationship facts for the model and the request audit."""
+    out = ["QUESTION: %s" % summary.get("question", "")]
+    def section(title, values):
+        if values:
+            out.append(title + ":")
+            out.extend("- " + str(value) for value in (values if isinstance(values, list) else [values]))
+    if summary.get("searched_for"):
+        out.append("SEARCHED FOR: %s%s" % (summary["searched_for"], " (start items: %s)" % ", ".join(summary.get("seeds") or []) if summary.get("seeds") else ""))
+    if summary.get("focus"):
+        out.append("FOCUS: " + ", ".join(summary["focus"]))
+    compare = summary.get("compare")
+    if compare:
+        section("COMPARE (the main question): selected", [", ".join(compare.get("picks") or [])])
+        section("They share", compare.get("shared"))
+        section("They differ", compare.get("differ"))
+        section("Other links in common", compare.get("other_common_links"))
+    selected = summary.get("selection")
+    if selected:
+        out.append("SELECTION: %s: %s" % (selected.get("name"), selected.get("about") or ""))
+        section("Its attributes", selected.get("attributes"))
+        section("Its relationships", selected.get("links"))
+    section("RELATIONSHIPS", summary.get("relationships"))
+    section("NEEDS ATTENTION (flagged in the data)", summary.get("needs_attention"))
+    return "\n".join(out)
+
+
+def explain(body):
+    """(status, payload) for the Hopper-only graph explanation request."""
+    if not isinstance(body, dict) or not isinstance(body.get("summary"), dict):
+        return 400, {"error": "summary is required"}
+    if len(json.dumps(body["summary"])) > 20000:
+        return 400, {"error": "summary is too large"}
+    mode = body.get("mode", "graph")
+    if mode not in ("graph", "bridge"):
+        return 400, {"error": "invalid mode"}
+    if mode == "bridge":
+        gap = body.get("gap")
+        if not isinstance(gap, dict) or not all(isinstance(gap.get(k), list) for k in ("a", "b")):
+            return 400, {"error": "bridge gap is required"}
+        prompt = BRIDGE_PROMPT.format(a=", ".join(map(str, gap["a"][:6])), b=", ".join(map(str, gap["b"][:6])))
+        basis = "two weakly connected note topics"
+    else:
+        prompt = EXPLAIN_PROMPT.format(summary=_explain_text(body["summary"]))
+        counts = body["summary"].get("counts") or {}
+        basis = "%s relationships, %s flags" % (counts.get("relationships", 0), counts.get("flags", 0))
+    model = routes.cfg("LLM_MODEL", "nemotron-3.5-lightning")
+    payload = {"model": model, "messages": [{"role": "system", "content": EXPLAIN_SYSTEM}, {"role": "user", "content": "/no_think\n" + prompt}],
+               "max_tokens": 700, "chat_template_kwargs": {"enable_thinking": False}}
+    try:
+        response = request(routes.cfg("LLM_URL", "http://hopper:8012/v1/chat/completions"), method="POST", body=payload, timeout=150)
+        data = response.json
+        if response.status >= 400:
+            err = data.get("error") if isinstance(data, dict) else None
+            raise RuntimeError((err.get("message") if isinstance(err, dict) else err) or "model request failed (HTTP %s)" % response.status)
+        answer = (((((data or {}).get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or "").strip()
+    except Exception as exc:  # noqa: BLE001 - surfaced in the Explain panel
+        return 502, {"error": str(exc) or type(exc).__name__}
+    if not answer:
+        return 504, {"error": "the model returned nothing (timeout or error)"}
+    return 200, {"text": answer, "model": model, "backend": "hopper", "basis": basis}

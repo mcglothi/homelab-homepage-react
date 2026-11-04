@@ -59,6 +59,7 @@ const T = {
   'about|mentions': ['Mentioned in', 'Mentions', 'is mentioned in'],
   'about|about': ['Mentioned in', 'About', 'is mentioned in'],
   'about|tracked in Docket': ['Tracked in Docket', 'Tracks', 'is tracked in'],
+  'cooccur|appear together': ['Appears with', 'Appears with', 'appears with'],
   'reported|reported': ['Reported', 'Reported by', 'reported'],
   'access|sudo access': ['Gives sudo to', 'Has sudo on', 'gives sudo access to'],
   'monitor|monitored by': ['Monitored by', 'Monitors', 'is monitored by'],

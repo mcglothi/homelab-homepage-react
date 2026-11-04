@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom'
 import { C, MONO, alpha } from '../../ui/theme'
 import { Button, Pill } from '../../ui/primitives'
-import { KIND, FACETS, facetOf, initialOrder, weightOf, capGroups, localSubset, metrics, gapNodes, WINDOWS, DEFAULT_WINDOW, DEFAULT_HALF_LIFE, windowLabel } from './analysis'
+import { KIND, FACETS, facetOf, initialOrder, weightOf, capGroups, localSubset, metrics, gapNodes, diversity, WINDOWS, DEFAULT_WINDOW, DEFAULT_HALF_LIFE, windowLabel } from './analysis'
 import { createEngine } from './engine'
 import { useGraphTheme } from './theme'
 import Explain from './Explain'
@@ -37,7 +37,9 @@ const trunc = (s, n = 22) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 
 // What kind of thing the search is about: a Control-M job search starts from the job, not from the CMDB hits it also finds
 // View settings that are remembered like the other graph controls (looks only; never what data is shown)
-const VIEW_KEYS = ['arrows', 'labels', 'backdrop', 'flow', 'panelMotion', 'color', 'size', 'curves', 'links', 'window', 'halfLife']
+// The lens part of a graph URL; YouTube notes join the concept lens only when asked for
+const lensQuery = e => (e.lens === 'concepts' ? '&lens=concepts' + (e.videos ? '&videos=1' : '') : '')
+const VIEW_KEYS = ['arrows', 'labels', 'backdrop', 'flow', 'panelMotion', 'color', 'size', 'curves', 'links', 'window', 'halfLife', 'lens', 'videos']
 const loadView = () => { try { const j = JSON.parse(localStorage.getItem('docket.graph.view.v1')); return j && typeof j === 'object' ? Object.fromEntries(VIEW_KEYS.filter(k => j[k] !== undefined).map(k => [k, j[k]])) : {} } catch (e) { return {} } }
 // Backdrop tuning, remembered per Docket theme (and light/dark): star opacity, saturation, density, and the grid/rings intensity
 const BD_KEY = 'docket.graph.backdrop.v1'
@@ -66,10 +68,10 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
     window.addEventListener('docket:scale', on)
     return () => window.removeEventListener('docket:scale', on)
   }, [])
-  const [S, setS] = useState(() => ({ mode: '2d', cap: 14, kinds: {}, depth: 1, size: 'links', color: 'kind', gaps: false, topics: false, labels: 'smart', arrows: 'smart', backdrop: 'subtle', links: 'ends', curves: true, minLinks: 0, hideHubs: false, find: '', window: DEFAULT_WINDOW, halfLife: DEFAULT_HALF_LIFE,
+  const [S, setS] = useState(() => ({ mode: '2d', lens: 'fleet', videos: false, cap: 14, kinds: {}, depth: 1, size: 'links', color: 'kind', gaps: false, topics: false, labels: 'smart', arrows: 'smart', backdrop: 'subtle', links: 'ends', curves: true, minLinks: 0, hideHubs: false, find: '', window: DEFAULT_WINDOW, halfLife: DEFAULT_HALF_LIFE,
     f: { center: 30, repel: 520, link: 55, dist: 95, layer: 35 }, panelMotion: 'calm', flow: { on: true, speed: 40, opacity: 55, sat: 60, density: 40 }, ...loadView() }))
   const set = useCallback(p => setS(s => ({ ...s, ...p })), [])
-  useEffect(() => { try { localStorage.setItem('docket.graph.view.v1', JSON.stringify(Object.fromEntries(VIEW_KEYS.map(k => [k, S[k]])))) } catch (e) { /* storage blocked */ } }, [S.arrows, S.labels, S.backdrop, S.flow, S.panelMotion, S.color, S.size, S.curves, S.links, S.window, S.halfLife]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { try { localStorage.setItem('docket.graph.view.v1', JSON.stringify(Object.fromEntries(VIEW_KEYS.map(k => [k, S[k]])))) } catch (e) { /* storage blocked */ } }, [S.arrows, S.labels, S.backdrop, S.flow, S.panelMotion, S.color, S.size, S.curves, S.links, S.window, S.halfLife, S.lens, S.videos]) // eslint-disable-line react-hooks/exhaustive-deps
   const pm = panelMotion(S.panelMotion)
   const [bdAll, setBdAll] = useState(loadBd)
   const bdVals = { ...bdDefaults(theme.light), ...(bdAll[theme.id] || {}) }
@@ -98,7 +100,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
   const [ready, setReady] = useState({ '2d': false, '3d': false })
 
   // ── the trail: roots (searches) and expansions (clicks), a cursor into it, and the data of each ──
-  const [trail, setTrail] = useState([{ kind: 'root', q, label: q }])
+  const [trail, setTrail] = useState([{ kind: 'root', q, lens: S.lens, videos: S.videos, label: q }])
   const [cursor, setCursor] = useState(0)
   const [data, setData] = useState({})       // key -> response
   const [busy, setBusy] = useState(null)
@@ -136,15 +138,15 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
     if (pendingSearch.current === q) {
       pendingSearch.current = null
       clear()
-      setTrail(tt => [...tt.slice(0, cursorRef.current + 1), { kind: 'root', q, label: 'search: ' + q, via: 'search' }])
+      setTrail(tt => [...tt.slice(0, cursorRef.current + 1), { kind: 'root', q, lens: S.lens, videos: S.videos, label: 'search: ' + q, via: 'search' }])
       setCursor(c => c + 1)
       return
     }
-    clear(); setTrail([{ kind: 'root', q, label: q }]); setCursor(0)
+    clear(); setTrail([{ kind: 'root', q, lens: S.lens, videos: S.videos, label: q }]); setCursor(0)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q])
 
-  const keyOf = e => (e.kind === 'root' ? 'q:' + e.q : e.kind === 'expand' ? 'x:' + e.id : 'none:' + e.kind)   // isolate steps carry no data
+  const keyOf = e => (e.kind === 'root' ? `q:${e.lens || 'fleet'}${e.videos ? '+v' : ''}:${e.q}` : e.kind === 'expand' ? 'x:' + e.id : 'none:' + e.kind)   // isolate steps carry no data
   const get = useCallback(async (url, key) => {
     setBusy(key); setError(null)
     try {
@@ -155,6 +157,13 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
       return j
     } catch (e) { setError(e.message); return null } finally { setBusy(b => (b === key ? null : b)) }
   }, [])
+  const changeLens = useCallback((lens, videos = S.videos) => {
+    if (lens === S.lens && videos === S.videos) return
+    set({ lens, videos })
+    setMulti([]); setShared(null); setRevealed(new Set()); setSel(null)
+    info.current = {}; none.current = new Set(); started.current.clear()
+    setData({}); setTrail([{ kind: 'root', q, lens, videos, label: q }]); setCursor(0)
+  }, [S.lens, S.videos, q, set])
   const active = trail[cursor]
   const rootIdx = useMemo(() => { for (let i = cursor; i >= 0; i--) if (trail[i].kind === 'root') return i; return 0 }, [trail, cursor])
   const rootEntry = trail[rootIdx]
@@ -163,15 +172,18 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
   useEffect(() => {
     const key = keyOf(rootEntry)
     if (data[key] || started.current.has(key)) return undefined
-    const url = `/api/graph?q=${encodeURIComponent(rootEntry.q)}`
+    const lens = lensQuery(rootEntry)
+    const url = `/api/graph?q=${encodeURIComponent(rootEntry.q)}${lens}`
     const t = setTimeout(async () => {
       started.current.add(key)
       const j = await get(url, key)
       if (!j) { started.current.delete(key); return }
-      setLiveFor(key)
-      grow.current = true
-      await get(url + '&live=1', key)
-      setLiveFor(f => (f === key ? null : f))
+      if (rootEntry.lens !== 'concepts') {
+        setLiveFor(key)
+        grow.current = true
+        await get(url + '&live=1', key)
+        setLiveFor(f => (f === key ? null : f))
+      }
     }, rootIdx === 0 ? 300 : 0)
     return () => clearTimeout(t)
   }, [rootEntry, data, get, rootIdx])
@@ -212,7 +224,8 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
     if (!raw || id.startsWith('more:')) return
     const key = 'x:' + id
     if (none.current.has(id) || trail.slice(rootIdx + 1, cursor + 1).some(e => e.kind === 'expand' && e.id === id)) return
-    const j = data[key] || await get(`/api/graph?expand=${encodeURIComponent(id)}`, key)
+    const lens = lensQuery(rootEntry)
+    const j = data[key] || await get(`/api/graph?expand=${encodeURIComponent(id)}${lens}`, key)
     if (!j) return
     info.current[id] = { total: j.total, shown: j.shown }
     const have = new Set(raw.nodes.map(n => n.id))
@@ -222,7 +235,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
     stamp()
     setTrail(t => [...t.slice(0, cursor + 1), { kind: 'expand', id, label }])
     setCursor(c => c + 1)
-  }, [raw, data, trail, cursor, rootIdx, get])
+  }, [raw, data, trail, cursor, rootIdx, get, rootEntry])
 
   // what the view looks like now, kept on the crumb we leave so that coming back restores it
   const snapshot = useCallback(() => ({ sel: live.current.sel, mode: live.current.S.mode, view: (() => { try { return engines.current[live.current.S.mode]?.viewState() } catch (e) { return null } })() }), [])
@@ -298,7 +311,8 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
   }, [raw, sel, seeds])
   const model = useMemo(() => {
     if (!raw) return null
-    const base = capGroups(raw, S.cap, wOf, revealed, boost, { windowDays: S.window, halfLife: S.halfLife })
+    // Concepts are one kind (weighted low as 'found'), so any per-kind cap folds most of them; the facade already caps at 60
+    const base = capGroups(raw, raw?.lens === 'concepts' ? Infinity : S.cap, wOf, revealed, boost, { windowDays: S.window, halfLife: S.halfLife })
     let nodes = base.nodes.filter(n => n.result || on(n.kind))
     const ids = new Set(nodes.map(n => n.id))
     let edges = base.edges.filter(e => ids.has(e.a) && ids.has(e.b))
@@ -641,6 +655,11 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
     </span>
   )
   const modeSeg = <Seg value={S.mode} onChange={v => set({ mode: v })} opts={[['2d', '2D'], ['3d', '3D']]} />
+  const lensSeg = <>
+    <Seg value={S.lens} onChange={l => changeLens(l)} opts={[['fleet', 'Fleet'], ['concepts', 'Concepts']]} />
+    {S.lens === 'concepts' && <Button size="sm" variant={S.videos ? 'primary' : 'default'} onClick={() => changeLens('concepts', !S.videos)}
+      title="Include the YouTube video notes (media/youtube/); off, the graph is your own notes">Videos</Button>}
+  </>
   const quick = (
     <>
       <Seg value={S.color} onChange={v => set({ color: v })} opts={[['kind', 'Color: kind'], ['comm', 'Color: community', 'Clusters found by modularity']]} />
@@ -782,13 +801,14 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
   // a node that is not in this graph: search everything for it and merge the result in, like a click that expands
   const pullIn = useCallback(async text => {
     const key = 'x:pull:' + text
-    const j = data[key] || await get(`/api/graph?q=${encodeURIComponent(text)}`, key)
+    const lens = lensQuery(rootEntry)
+    const j = data[key] || await get(`/api/graph?q=${encodeURIComponent(text)}${lens}`, key)
     if (!j || !j.nodes.length) return
     grow.current = true
     setTrail(t => [...t.slice(0, cursor + 1), { kind: 'expand', id: 'pull:' + text, label: text }])
     setCursor(c => c + 1)
     if (j.seeds?.[0]) { setMulti(m => (m.includes(j.seeds[0]) ? m : [...m, j.seeds[0]])); setShared(null) }
-  }, [data, get, cursor])
+  }, [data, get, cursor, rootEntry])
 
   const vis = chrome && !!model
   const badges = { compare: multi.length ? { n: multi.length } : null, insights: flagCount ? { n: flagCount > 99 ? '99+' : flagCount, warn: true } : null, details: null }
@@ -798,7 +818,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
     details: (
       <DetailsCard node={node} model={model} raw={raw} rawById={rawById} byId={byId} select={select} theme={theme} info={info.current[sel]} picked={multi.includes(sel)} onCompare={() => sel && toggleMulti(sel)}
         pinned={pins.includes(sel)} onUnpin={() => engines.current[S.mode]?.unpinId(sel)} onReveal={revealNode} isoId={isoId} onIsolate={isolate} onSearch={onSearch ? searchFor : null}
-        onCenter={() => sel && select(sel)} focus={focus} onHoverNode={id => engines.current[S.mode]?.setExtHover(id)} />
+        onCenter={() => sel && select(sel)} focus={focus} search={rootEntry.q} onHoverNode={id => engines.current[S.mode]?.setExtHover(id)} />
     ),
     compare: (
       <CompareTray ids={multi} result={cmp} ix={ix || { byId: new Map() }} shared={shared} onShared={pickShared} onSelect={id => select(id)}
@@ -843,7 +863,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
           <button onClick={() => setBar(b => !b)} aria-label={ui.bar ? 'Collapse the toolbar' : 'Expand the toolbar'} aria-expanded={ui.bar} title={ui.bar ? 'Collapse the toolbar' : 'Expand the toolbar'}
             style={{ width: 24, height: 24, borderRadius: 6, border: `1px solid ${C.line}`, background: 'transparent', color: C.muted, cursor: 'pointer', fontSize: 11 }}>{ui.bar ? '▴' : '▾'}</button>
           {trailBar}
-          {!ui.bar && <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center', animation: `gfade ${m.ms}ms ${EASE}` }}>{find(150)}{modeSeg}</span>}
+          {!ui.bar && <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center', animation: `gfade ${m.ms}ms ${EASE}` }}>{find(150)}{lensSeg}{modeSeg}</span>}
           {pins.length > 0 && <Button size="sm" onClick={() => engines.current[S.mode]?.unpinAll()} title="Pinned nodes stay where you dropped them. Double-click one to release it, or release all.">Unpin all ({pins.length})</Button>}
           <Button size="sm" onClick={() => engines.current[S.mode]?.fit(900)} title="Frame the whole graph">Fit</Button>
           <Button size="sm" onClick={() => setFocusMode(true)} title="Focus mode (F): hide everything but the graph">Focus mode</Button>
@@ -857,7 +877,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
               {chips}
               <span style={{ flex: 1 }} />
               {find(150)}
-              {modeSeg}
+              {lensSeg}{modeSeg}
               <Seg value={S.labels} onChange={v => set({ labels: v })} title="How many labels: Off shows only the node you point at or pick, Smart fits as many as have room (more as you zoom in), More packs them tighter" opts={[['off', 'Labels: off'], ['smart', 'Smart'], ['more', 'More']]} />
             </div>
           </div>
@@ -963,7 +983,7 @@ function Insights({ model, select, color, theme }) {
     const orphans = hosts.filter(n => n.result && !owned.has(n.id))
     const nocmdb = hosts.filter(n => (n.attrs || []).some(a => a[0] === 'In CMDB' && a[1] !== 'yes'))
     const dups = hosts.filter(n => (n.attrs || []).some(a => a[0] === 'CMDB duplicates'))
-    return { top, cl, pairs, orphans, nocmdb, dups, gaps: hosts.filter(n => model.gap.has(n.id)).length }
+    return { top, cl, pairs, orphans, nocmdb, dups, gaps: hosts.filter(n => model.gap.has(n.id)).length, diversity: diversity(ns, model.edges) }
   }, [ns, model])
   if (!info) return null
   const col = n => (color === 'comm' ? theme.comm[n.comm % theme.comm.length] : theme.kind[n.kind])
@@ -979,6 +999,7 @@ function Insights({ model, select, color, theme }) {
   return (
     <div>
       <H3>Network insights</H3>
+      <div style={{ fontSize: 12, lineHeight: 1.45, marginBottom: 8 }}>Diversity: <span style={{ color: C.accent }}>{info.diversity.label}</span> (Q {info.diversity.q.toFixed(2)}, top topic {Math.round(info.diversity.topShare * 100)}%)<div style={{ color: C.muted }}>{info.diversity.label === 'biased' ? 'One topic holds most of the graph.' : info.diversity.label === 'focused' ? 'Topics are lightly separated.' : info.diversity.label === 'diversified' ? 'Several distinct topics are represented.' : 'Topics are strongly separated.'}</div></div>
       <div style={{ ...sub, marginTop: 2 }}>Bridges (most influence)</div>
       {info.top.map(n => (
         <div key={n.id} style={row} onClick={() => select(n.id)}>
@@ -997,10 +1018,11 @@ function Insights({ model, select, color, theme }) {
       ))}
       {info.pairs.length > 0 && <>
         <div style={sub}>Weakest ties between communities</div>
-        {info.pairs.slice(0, 2).map((p, i) => (
-          <div key={i} style={{ ...row, cursor: 'default' }}>
+        {info.pairs.slice(0, 2).map(p => (
+          <div key={p[0][0] + '-' + p[1][0]} style={{ ...row, cursor: 'default', flexWrap: 'wrap' }}>
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name(p[0])} ↔ {name(p[1])}</span>
             <span style={{ color: C.dim, fontSize: 11 }}>{p[2]} link{p[2] === 1 ? '' : 's'}</span>
+            <Explain compact mode="bridge" gap={{ a: p[0][1].slice().sort((a, b) => b.bc - a.bc).slice(0, 6).map(n => n.label), b: p[1][1].slice().sort((a, b) => b.bc - a.bc).slice(0, 6).map(n => n.label) }} summary={() => ({ question: 'Find a bridge between these AIKB topics.' })} />
           </div>
         ))}
       </>}
