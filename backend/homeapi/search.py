@@ -230,6 +230,8 @@ def _tautulli_history():
         return None
     after = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
     data = routes.tautulli("get_history&length=1000&after=" + after)()
+    if not isinstance(data, dict) or (data.get("response") or {}).get("result") not in (None, "success"):
+        raise RuntimeError("Tautulli history unavailable")  # the graph warns; an empty list would hide it
     rows = ((data or {}).get("response") or {}).get("data") or {}
     rows = rows.get("data") if isinstance(rows, dict) else rows
     return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
@@ -245,7 +247,7 @@ def history():
 
 def _history_when(value):
     try:
-        return datetime.fromtimestamp(float(value), timezone.utc)
+        return datetime.fromtimestamp(float(value), timezone.utc) if float(value) > 0 else None
     except (TypeError, ValueError, OSError, OverflowError):
         return None
 

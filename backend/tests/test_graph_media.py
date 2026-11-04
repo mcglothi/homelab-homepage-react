@@ -49,15 +49,15 @@ class GraphMediaTest(unittest.TestCase):
 
     def test_nodes_edges_episode_fold_and_library(self):
         nodes, edges = graph._all(self.F)
-        self.assertEqual({n["id"] for n in nodes.values() if n["kind"] == "title"}, {"t:50", "t:200"})
-        self.assertEqual(nodes["t:50"]["label"], "Severance")
-        self.assertEqual(dict(nodes["t:50"]["attrs"])["Last watched episode"], "Severance - Half Loop")
-        self.assertEqual(dict(nodes["t:50"]["attrs"])["In library"], "on disk")
-        self.assertEqual(dict(nodes["t:200"]["attrs"])["In library"], "missing")
-        self.assertEqual(dict(nodes["t:200"]["attrs"])["Open"], "https://radarr.home.timmcg.net/movie/the-missing")
+        self.assertEqual({n["id"] for n in nodes.values() if n["kind"] == "title"}, {"tt:50", "tt:200"})
+        self.assertEqual(nodes["tt:50"]["label"], "Severance")
+        self.assertEqual(dict(nodes["tt:50"]["attrs"])["Last watched episode"], "Severance - Half Loop")
+        self.assertEqual(dict(nodes["tt:50"]["attrs"])["In library"], "on disk")
+        self.assertEqual(dict(nodes["tt:200"]["attrs"])["In library"], "missing")
+        self.assertEqual(dict(nodes["tt:200"]["attrs"])["Open"], "https://radarr.home.timmcg.net/movie/the-missing")
         self.assertEqual(len([n for n in nodes.values() if n["kind"] == "viewer"]), 2)
         self.assertEqual(len([n for n in nodes.values() if n["kind"] == "device"]), 3)
-        self.assertNotIn("t:300", nodes)
+        self.assertNotIn("tt:300", nodes)
         self.assertTrue(any(e["kind"] == "served_by" and e["b"] == "a:plex" for e in edges))
         self.assertTrue(all(e["prov"] == "extracted" for e in edges if e["kind"] in ("watched", "watches_on", "served_by")))
 
@@ -85,6 +85,38 @@ class GraphMediaTest(unittest.TestCase):
         self.assertEqual({n["kind"] for n in graph.build("media:")["nodes"] if n["result"]}, {"title"})
         self.assertIn("viewer", kinds("media:"))
         self.assertEqual(graph.build("media: leslie")["seeds"], [i for i, n in graph._all(self.F)[0].items() if n["label"] == "Leslie"])
+
+    def test_review_fixes(self):  # agy review of the media branch
+        self.rows[0]["year"] = "2025"   # a season-2 episode's air year; Sonarr has the 2022 premiere
+        self.rows[2]["date"] = "0"      # Tautulli's "no date"
+        self.rows.append(play(user="bob", friendly_name="Bob", user_id="3", media_type="movie", title="Other", full_title="Other",
+                              grandparent_title="", rating_key="400", grandparent_rating_key="", year="2020"))
+        nodes, _ = graph._all(self.F)
+        self.assertEqual(dict(nodes["tt:50"]["attrs"])["In library"], "on disk")
+        self.assertIn("last unknown", nodes["tt:200"]["sub"])
+        self.assertFalse(any(i.startswith("t:") for i, n in nodes.items() if n["kind"] == "title"))
+        ids = {n["id"] for n in graph.build("media: severance")["nodes"]}
+        self.assertIn("tt:50", ids)
+        self.assertIn("tt:200", ids)               # what Severance's viewers also watched
+        self.assertNotIn("tt:400", ids)            # but not every title Plex serves
+        self.assertNotIn("h:turing", ids)
+
+    def test_tautulli_error_payload_warns(self):
+        from homeapi import routes
+        tautulli, key = routes.tautulli, routes.cfg
+        search.history = self.history
+        routes.tautulli = lambda cmd: (lambda: {"response": {"result": "error", "message": "Invalid apikey", "data": {}}})
+        routes.cfg = lambda k, d=None: "x" if k == "TAUTULLI_KEY" else key(k, d)
+        try:
+            search._history = Cached(600, search._tautulli_history)
+            warnings = graph.build("")["warnings"]
+            self.assertIn("Tautulli is unavailable, so media activity is left out", warnings)
+        finally:
+            routes.tautulli, routes.cfg = tautulli, key
+
+    def test_aikb_warning_survives_tautulli_warning(self):
+        search.history = lambda: None
+        self.assertIn(graph.AIKB_DOWN, graph.build("turing")["warnings"])
 
     def test_tautulli_down_warns_without_breaking_graph(self):
         search.history = lambda: (_ for _ in ()).throw(OSError("down"))

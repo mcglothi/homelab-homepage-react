@@ -289,7 +289,7 @@ def _all(F, live=False):
 
     def watched(value):
         try:
-            return datetime.fromtimestamp(float(value), timezone.utc)
+            return datetime.fromtimestamp(float(value), timezone.utc) if float(value) > 0 else None  # 0 = no date
         except (TypeError, ValueError, OSError, OverflowError):
             return None
 
@@ -304,7 +304,8 @@ def _all(F, live=False):
         for item in values:
             if str(item.get("title") or "").lower() != title.lower():
                 continue
-            if year and str(item.get("year") or "") != str(year):
+            # a show's episode row carries the episode's air year, not the series' premiere year
+            if media_type == "movie" and year and str(item.get("year") or "") != str(year):
                 continue
             if media_type == "movie":
                 return ("on disk" if item.get("hasFile") else "missing", "https://radarr.home.timmcg.net/movie/%s" % item.get("titleSlug"))
@@ -326,7 +327,7 @@ def _all(F, live=False):
         player, platform = str(row.get("player") or "").strip(), str(row.get("platform") or "").strip()
         if not title or not rating or not user_id or not viewer:
             continue
-        tid, uid = "t:" + rating, "u:" + user_id
+        tid, uid = "tt:" + rating, "u:" + user_id  # "t:" is Prometheus targets; the viewer folds by id prefix
         did = "dev:%s|%s" % (player.lower(), platform.lower()) if player else None
         when = watched(row.get("date"))
         media = "movie" if media_type == "movie" else "show"
@@ -399,6 +400,7 @@ def _seeds(q, nodes):
 
 
 MEDIA_KINDS = ("viewer", "device", "title")
+AIKB_DOWN = "AIKB is unreachable, so notes are left out"
 
 
 def _n(count, word):
@@ -645,8 +647,10 @@ def build(q, expand=None, live=False, lens=None, videos=False):
             seeds = [] if notes_only else _seeds(text, nodes)
         if everything:
             keep = set(nodes)
-        elif scope == "media" or any(nodes[i]["kind"] in MEDIA_KINDS for i in seeds):
-            keep = _around(seeds, edges, DEPTH)
+        elif scope == "media" or (seeds and all(nodes[i]["kind"] in MEDIA_KINDS for i in seeds)):
+            # who watched it and what else they watched, but not every title Plex serves
+            own = [e for e in edges if e["kind"] != "served_by"]
+            keep = _around(seeds, own, DEPTH) | _around(seeds, edges, 1)
         else:
             # Plex history is 90 leaf nodes: a host two hops from Plex must not pull every title in.
             # They show one hop from a start node (searching plex lists what was watched), no further.
@@ -673,8 +677,8 @@ def build(q, expand=None, live=False, lens=None, videos=False):
         if joins is None:
             # Nothing from AIKB: an expanded note must come back empty-handed, not as "no neighbors"
             found = {}
-            if not warnings:
-                warnings.append("AIKB is unreachable, so notes are left out")
+            if AIKB_DOWN not in warnings:
+                warnings.append(AIKB_DOWN)
         for nid in found:
             if titles.get(nid[2:]):
                 found[nid]["label"] = titles[nid[2:]]
@@ -690,8 +694,8 @@ def build(q, expand=None, live=False, lens=None, videos=False):
         seeds += [i for i in found if i not in seeds]
         notes, note_edges = _notes([s for s in seeds if s in keep], nodes)
         if notes is None:
-            if not warnings:
-                warnings.append("AIKB is unreachable, so notes are left out")
+            if AIKB_DOWN not in warnings:
+                warnings.append(AIKB_DOWN)
         else:
             for nid, n in notes.items():
                 out.setdefault(nid, dict(n, result=False))
