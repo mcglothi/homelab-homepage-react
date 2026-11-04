@@ -163,7 +163,8 @@ def _aikb(q):
             continue
         title, section = r.get("title") or r.get("file") or "Untitled", r.get("section") or "overview"
         detail = re.sub(r"\s+", " ", re.sub(r"^\s*#{1,6}\s*", "", r.get("excerpt") or "")).strip()
-        children = [{"title": e.get("name"), "subtitle": "host"} for e in (r.get("entities") or [])
+        # A click on a host row searches for it (the host's own results and graph)
+        children = [{"title": e.get("name"), "subtitle": "host", "search": "host:" + e["name"]} for e in (r.get("entities") or [])
                     if isinstance(e, dict) and e.get("kind") == "host" and e.get("name")][:4]
         items.append({"title": title if section == "overview" else "%s · %s" % (title, section),
                       "subtitle": " · ".join(filter(None, [r.get("file"), r.get("date")])), "detail": detail,

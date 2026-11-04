@@ -100,6 +100,13 @@ class APITests(unittest.TestCase):
         status, body = self.request("/mentions?name=missing")
         self.assertEqual((status, body["kind"], body["notes"]), (200, None, []))
 
+    def test_links_skip_terms_and_non_notes(self):
+        status, body = self.request("/links?path=notes/one.md&path=notes/two.md&path=notes/plain.txt")
+        self.assertEqual(status, 200)
+        self.assertEqual(sorted(body["links"]), ["notes/one.md", "notes/two.md"])
+        self.assertEqual(sorted(e["name"] for e in body["links"]["notes/one.md"]), ["10.0.0.2", "turing"])
+        self.assertEqual([e["name"] for e in body["links"]["notes/two.md"]], ["turing"])   # "misc" is a term
+
     def test_not_found_and_method(self):
         self.assertEqual(self.request("/nope")[0], 404)
         self.assertEqual(self.request("/healthz", "POST")[0], 405)

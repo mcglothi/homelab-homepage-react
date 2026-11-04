@@ -149,6 +149,23 @@ class App:
                           for file_path, section, _, hits in rows]}
 
 
+    def links(self, paths, limit):
+        """The names each note mentions (hosts, IPs, files, tags; not free terms), for joining notes to the fleet."""
+        paths = [p for p in dict.fromkeys(paths) if p.endswith(".md")][:25]
+        if not paths:
+            return {"links": {}}
+        marks = ",".join("?" * len(paths))
+        found = {p: [] for p in paths}
+        with self.connect() as conn:
+            for file_path, name, kind, hits in conn.execute(f"""SELECT c.file_path, e.name, e.kind, COUNT(DISTINCT c.id) AS hits
+                                                  FROM chunks c JOIN entity_chunks ec ON ec.chunk_id=c.id JOIN entities e ON e.id=ec.entity_id
+                                                  WHERE c.file_path IN ({marks}) AND e.kind IN ('host', 'ip', 'file', 'tag')
+                                                  GROUP BY c.file_path, e.id ORDER BY hits DESC""", paths):
+                if len(found[file_path]) < limit:
+                    found[file_path].append({"name": name, "kind": kind, "hits": hits})
+        return {"links": found}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "AIKBSearchHTTP/1.0"
 
@@ -185,6 +202,8 @@ class Handler(BaseHTTPRequestHandler):
                 status = 200
             elif parsed.path == "/note":
                 body, status = app.note(args.get("path", [""])[0]), 200
+            elif parsed.path == "/links":
+                body, status = app.links(args.get("path", []), clamp(args.get("limit", [80])[0], 80, 1, 300)), 200
             elif parsed.path == "/mentions":
                 body, status = app.mentions(args.get("name", [""])[0], clamp(args.get("limit", [20])[0], 20, 1, 50)), 200
             else:
