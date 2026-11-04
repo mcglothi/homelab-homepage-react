@@ -838,7 +838,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
           <span style={{ color: flags.inferred ? theme.flag.inferred : C.dim }}>● {flags.inferred} inferred</span> · <span style={{ color: model.gap.size ? C.amber : C.dim }}>{model.gap.size} gap node{model.gap.size === 1 ? '' : 's'}</span>
         </div>
         <Explain summary={summary} />
-        <Insights model={model} select={select} color={S.color} theme={theme} onSearch={searchSuggested} search={rootEntry.q} />
+        <Insights model={model} select={select} color={S.color} theme={theme} onSearch={searchSuggested} search={rootEntry.q} changes={raw?.changes} />
       </>
     ),
     legend: legend,
@@ -945,6 +945,8 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
           {raw.coverage?.error && <span style={{ color: C.amber }}>list not added: {raw.coverage.error}</span>}
           {liveFor === rootKey && <span style={{ color: C.dim }}>adding live sources…</span>}
           {raw.truncated && <span style={{ color: C.amber }}>capped at {raw.matched}; narrow the search to see the rest</span>}
+          {raw.affected && <span style={{ color: C.red }}>Blast radius of {raw.nodes.find(n => n.id === raw.affected.from)?.label ?? raw.affected.from}: {raw.affected.count} nodes</span>}
+          {raw.changes?.since && <span style={{ color: C.green }}>Changed since {raw.changes.since}: +{raw.changes.added} −{raw.changes.removed}</span>}
           {flags.conflict > 0 && <span style={{ color: theme.flag.conflict }}>● {flags.conflict} source conflict{flags.conflict === 1 ? '' : 's'}</span>}
           {flags.missing > 0 && <span style={{ color: theme.flag.missing }}>● {flags.missing} missing link{flags.missing === 1 ? '' : 's'}</span>}
           {flags.inferred > 0 && <span style={{ color: theme.flag.inferred }}>● {flags.inferred} inferred pair{flags.inferred === 1 ? '' : 's'}</span>}
@@ -966,7 +968,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
 const pillStyle = w => ({ ...glass, width: w, height: 28, padding: 0, justifyContent: 'center', display: 'inline-flex', alignItems: 'center', fontFamily: MONO, fontSize: 11, letterSpacing: 0.5, color: C.bright, cursor: 'pointer', opacity: 0.6, transition: 'opacity .15s' })
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
 
-function Insights({ model, select, color, theme, onSearch, search }) {
+function Insights({ model, select, color, theme, onSearch, search, changes }) {
   const ns = model.nodes
   const info = useMemo(() => {
     if (!ns.length) return null
@@ -1005,6 +1007,7 @@ function Insights({ model, select, color, theme, onSearch, search }) {
   return (
     <div>
       <H3>Network insights</H3>
+      {changes?.since && <div style={{ fontFamily: MONO, fontSize: 10.5, color: C.green, marginBottom: 6 }}>Changed since {changes.since}: +{changes.added} −{changes.removed}</div>}
       <div style={{ fontSize: 12, lineHeight: 1.45, marginBottom: 8 }}>Diversity: <span style={{ color: C.accent }}>{info.diversity.label}</span> (Q {info.diversity.q.toFixed(2)}, top topic {Math.round(info.diversity.topShare * 100)}%)<div style={{ color: C.muted }}>{info.diversity.label === 'biased' ? 'One topic holds most of the graph.' : info.diversity.label === 'focused' ? 'Topics are lightly separated.' : info.diversity.label === 'diversified' ? 'Several distinct topics are represented.' : 'Topics are strongly separated.'}</div></div>
       <div style={{ ...sub, marginTop: 2 }}>Bridges (most influence)</div>
       {info.top.map(n => (

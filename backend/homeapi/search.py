@@ -42,9 +42,25 @@ def parse_path(q):
     return (a, b) if a and b else None
 
 
+def parse_affected(q):
+    """`affected:` and `impact:` ask what depends on a fleet thing."""
+    m = re.match(r"^\s*(?:affected|impact)\s*:\s*(.*?)\s*$", q or "", re.I)
+    # "affected: host:babbage": a scope prefix on the name just names it, as on a path end
+    name = re.sub(r"^(?:host|app)\s*:\s*", "", m.group(1), flags=re.I) if m else ""
+    return name or None
+
+
+def parse_changes(q):
+    return bool(re.match(r"^\s*(?:changes\s*:|changed|what\s+changed)\s*$", q or "", re.I))
+
+
 def kind_of(q):
     if parse_path(q):
         return "path"
+    if parse_affected(q):
+        return "affected"
+    if parse_changes(q):
+        return "changes"
     t = q.strip().lower()
     F = fleet.get()
     if fleet.is_ip(t):
@@ -78,7 +94,7 @@ def _host_item(h):
 
 
 def fast(q):
-    if parse_path(q):
+    if parse_path(q) or parse_affected(q) or parse_changes(q):
         return []
     F = fleet.get()
     groups = []
@@ -349,6 +365,10 @@ def _aikb(q):
 def plan(q, scope=None):
     if parse_path(q):
         return "path", None, [("Path", lambda: _path(q))]
+    if parse_affected(q):
+        return "affected", None, [("Affected", lambda: _affected(q))]
+    if parse_changes(q):
+        return "changes", None, [("Changes", lambda: _changes(q))]
     kind = kind_of(q)
     sources = []
     if kind in ("host", "ip", "app"):
@@ -392,8 +412,50 @@ def _path(q):
     return {"source": "path", "title": "How %s connects to %s" % ends, "items": items} if items else None
 
 
+KIND_WORDS = {"app": ("app", "apps"), "host": ("host or VM", "hosts and VMs"), "pool": ("pool", "pools"),
+              "dataset": ("dataset", "datasets"), "proxy": ("proxy name", "proxy names"), "dns": ("DNS name", "DNS names"),
+              "service": ("dashboard card", "dashboard cards"), "cert": ("certificate", "certificates")}
+
+
+def _count_words(counts):
+    # biggest first: the headline is "62 proxy names", not an alphabetical list
+    words = lambda kind, n: KIND_WORDS.get(kind, (kind, kind + "s"))[n != 1]   # noqa: E731
+    return ", ".join("%s %s" % (n, words(kind, n)) for kind, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def _affected(q):
+    from . import graph  # graph owns the walk and its dependency direction table
+    data = graph.build(q)
+    affected = data.get("affected") or {}
+    by_id = {n["id"]: n for n in data.get("nodes") or []}
+    start = by_id.get(affected.get("from"), {})
+    if not start:
+        return None
+    items = [{"title": "If %s goes down: %s" % (start.get("label"), _count_words(affected.get("by_kind") or {}) or "nothing else"),
+              "subtitle": "%s dependent node%s" % (affected.get("count", 0), "" if affected.get("count", 0) == 1 else "s")}]
+    for n in sorted((n for n in by_id.values() if n.get("hop")), key=lambda n: (n["hop"], n["label"].lower())):
+        via = by_id.get(n.get("via_node"), {}).get("label", n.get("via_node", ""))
+        items.append({"title": n["label"], "subtitle": "hop %s · via %s %s" % (n["hop"], n.get("via") or "links to", via), "search": n["label"]})
+    return {"source": "affected", "title": "Affected", "items": items}
+
+
+def _changes(q):
+    from . import graph
+    data = graph.build(q)
+    changed = data.get("changes") or {}
+    since = changed.get("since")
+    if not since:
+        return None
+    items = [{"title": "Since %s: +%s node%s, −%s node%s, +%s link%s, −%s link%s" %
+              (since, changed["added"], "" if changed["added"] == 1 else "s", changed["removed"], "" if changed["removed"] == 1 else "s",
+               changed["edges_added"], "" if changed["edges_added"] == 1 else "s", changed["edges_removed"], "" if changed["edges_removed"] == 1 else "s")}]
+    for n in sorted((n for n in data.get("nodes") or [] if n.get("change")), key=lambda n: (n["change"], n["label"].lower())):
+        items.append({"title": n["label"], "subtitle": "%s %s" % (n["change"], n["kind"]), "search": n["label"]})
+    return {"source": "changes", "title": "Changes", "items": items}
+
+
 def _scoped(scope, kind, resolved, sources, groups):
-    if not scope or kind == "path":
+    if not scope or kind in ("path", "affected", "changes"):
         return sources, groups
     return [(n, f) for n, f in sources if n in SCOPE_SOURCES[scope]], [g for g in groups if g["source"] in SCOPE_TAGS[scope]]
 
@@ -407,9 +469,18 @@ def search(q, mode="fast", scope=None):
     scope, q = parse_scope(q, scope)
     if len(q) < 2 and scope not in ("ops", "media"):
         return {"q": q, "kind": None, "groups": []}
-    if parse_path(q):
-        groups = _groups_of(_path(q))
-        return {"q": q, "asked": q, "kind": "path", "resolved": None, "mode": mode, "scope": scope, "groups": groups}
+    if parse_path(q) or parse_affected(q) or parse_changes(q):
+        kind, _, sources = plan(q, scope)
+        # these build the whole graph: not on every keystroke, only for the full pass
+        if mode != "full" and not parse_path(q):
+            return {"q": q, "asked": q, "kind": kind, "resolved": None, "mode": "fast", "scope": scope, "groups": []}
+        groups = []
+        for _, fn in sources:
+            try:
+                groups += _groups_of(fn())
+            except Exception:  # noqa: BLE001 - one broken source must not fail the search
+                pass
+        return {"q": q, "asked": q, "kind": kind, "resolved": None, "mode": mode, "scope": scope, "groups": groups}
     kind, resolved, sources = plan(q, scope)
     sources, local = _scoped(scope, kind, resolved, sources, fast(q))
     if mode != "full":

@@ -204,7 +204,7 @@ class Engine {
       }
       n.dying = 0
       Object.assign(n, { kind: m.kind, label: m.label, sub: m.sub, attrs: m.attrs, count: m.count, missing: m.missing, result: m.result, more: m.more,
-        deg: m.deg, bc: m.bc, comm: m.comm, val: m.val, tr: m.radius, rank: m.rank, depth: m.depth, wt: m.wt ?? 1, rk: m.rk ?? null })
+        deg: m.deg, bc: m.bc, comm: m.comm, val: m.val, tr: m.radius, rank: m.rank, depth: m.depth, hop: m.hop, wt: m.wt ?? 1, rk: m.rk ?? null })
     }
     for (const [id, n] of this.store) if (!keep.has(id) && !n.dying) n.dying = now
     this.retarget()
@@ -799,6 +799,7 @@ class Engine {
       ctx.strokeStyle = T.bg; ctx.lineWidth = Math.min(1.4, r * 0.3); ctx.stroke()   // a thin ring in the page color keeps overlapping nodes apart
     }
     if (n.result && r > 3 && this.store.size < 200 && !(this.vis.seeds && this.vis.seeds.has(n.id))) { ctx.strokeStyle = T.accent; ctx.globalAlpha = n.a * 0.4; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.arc(n.x, n.y, r + 2.5, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = n.a }
+    if (n.hop && r > 3) { ctx.strokeStyle = this.seedCss(); ctx.globalAlpha = n.a * Math.max(0.18, 0.6 - n.hop * 0.1); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(n.x, n.y, r + 2.5 + n.hop, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = n.a }
     const mk = this.markerKind(n)
     if (mk && r > 1.5) {
       if (mk === 'seed' && n.a > 0.5) n.__born ??= this.now
