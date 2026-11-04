@@ -117,6 +117,15 @@ pending:
         self.assertEqual(api.clamp("99", 8, 1, 25), 25)
         self.assertEqual(api.clamp("0", 8, 1, 25), 1)
 
+    def test_filename_words_lead(self):
+        # the stub search never returns notes/three.md; its path holds every query word
+        status, body = self.request("/search?q=three+notes")
+        self.assertEqual(status, 200)
+        self.assertEqual([r["file"] for r in body["results"]], ["notes/three.md", "notes/one.md", "notes/two.md"])
+        self.assertEqual(body["results"][0]["sources"], ["path"])
+        status, body = self.request("/search?q=two")   # already a hit: moved up, not duplicated
+        self.assertEqual([r["file"] for r in body["results"]], ["notes/two.md", "notes/one.md"])
+
     def test_short_query(self):
         status, body = self.request("/search?q=x")
         self.assertEqual(status, 400)

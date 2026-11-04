@@ -3,11 +3,11 @@
 import json
 import math
 import os
+import re
 import sqlite3
 import sys
 import threading
 import time
-import re
 from contextlib import closing
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -39,6 +39,14 @@ def load_search(root):
     return search.search
 
 
+PATH_MAX = 10
+PATH_STOP = set("a an and are for how i in is it me my of on or s the to we with".split())
+
+
+def _words(text):
+    return [w for w in re.split(r"[^a-z0-9]+", text.lower()) if w]
+
+
 def _as_list(value):
     """A hand-edited `pending: none` must not be iterated as characters downstream."""
     return value if isinstance(value, list) else []
@@ -57,6 +65,7 @@ class App:
         self.state_mtime = None
         self.state_value = None
         self.state_lock = threading.Lock()
+        self.paths_mtime, self.paths = None, {}
 
     @staticmethod
     def _short(value):
@@ -177,7 +186,7 @@ class App:
             if f.endswith(".md") and not f.startswith("_runtime/") and f not in seen:
                 seen.add(f)
                 notes.append(r)
-        results = notes[:count]
+        results = self.by_path(query, notes)[:count]
         entities = self.chunk_entities(results)
         return [{
             "file": item.get("file", ""), "section": item.get("section", "overview"),
@@ -186,6 +195,44 @@ class App:
             "title": self.title(item.get("file", "")),
             "entities": entities.get((item.get("file", ""), item.get("section", "overview")), []),
         } for item in results]
+
+    def note_paths(self):
+        """Every note's path words (dirs + filename), rebuilt when the index file changes."""
+        try:
+            mtime = self.db.stat().st_mtime_ns
+        except OSError:
+            return {}
+        if mtime != self.paths_mtime:
+            with self.connect() as con:
+                rows = con.execute("SELECT DISTINCT file_path FROM chunks WHERE file_path LIKE '%.md' AND substr(file_path, 1, 9) != '_runtime/'").fetchall()
+            paths = {}
+            for (f,) in rows:
+                parts = f[:-3].split("/")
+                if not any(p.startswith(".") for p in parts):
+                    paths[f] = (set(_words(" ".join(parts))), set(_words(parts[-1])))
+            self.paths_mtime, self.paths = mtime, paths
+        return self.paths
+
+    def by_path(self, query, notes):
+        """Notes whose path holds every query word lead, fewest extra filename words first.
+
+        The hybrid index ignores filenames, so "blurt hi codex 2b6362" missed the note named exactly that.
+        A query matching more than PATH_MAX paths is too generic to reorder anything.
+        """
+        words = {w for w in _words(query) if w not in PATH_STOP}
+        paths = self.note_paths() if words else {}
+        hits = [f for f, (all_words, _) in paths.items() if words <= all_words]
+        if not hits or len(hits) > PATH_MAX:
+            return notes
+        known = {n.get("file"): i for i, n in enumerate(notes)}
+        hits.sort(key=lambda f: (len(paths[f][1] - words), known.get(f, len(notes))))
+        lead = [notes[known[f]] if f in known else self.first_chunk(f) for f in hits]
+        return [n for n in lead if n] + [n for n in notes if n.get("file") not in set(hits)]
+
+    def first_chunk(self, relative):
+        with self.connect() as con:
+            row = con.execute("SELECT section, content FROM chunks WHERE file_path = ? ORDER BY id LIMIT 1", (relative,)).fetchone()
+        return {"file": relative, "section": row[0] or "overview", "excerpt": (row[1] or "")[:280], "sources": ["path"]} if row else None
 
     def note(self, relative):
         requested = Path(relative)
