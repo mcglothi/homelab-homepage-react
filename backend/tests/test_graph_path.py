@@ -27,6 +27,19 @@ class GraphPathTest(unittest.TestCase):
     def tearDown(self):
         graph.fleet.get, graph._all, graph._notes, graph._joins, graph._aikb, graph.build = self.fleet_get, self.all, self.notes, self.joins, self.aikb, self.build
 
+    def test_same_end_twice_is_no_route(self):
+        data = graph.build("plex .. plex")
+        self.assertEqual(data["path"]["routes"], [])
+        self.assertIn("both ends are the same node", data["warnings"])
+
+    def test_duplicate_note_hop_keeps_the_best_sourced_edge(self):
+        dup = {"a": "a:plex", "b": "n:bridge.md", "kind": "about", "label": "mentions", "via": "AIKB", "flag": "ambiguous"}
+        graph._joins = lambda files, nodes, F: ([dup, {"a": "a:vault", "b": "n:bridge.md", "kind": "about", "label": "mentions", "via": "AIKB"}], {})
+        data = graph.build("plex .. vaultwarden")
+        hop = [e for e in data["edges"] if (e["a"], e["b"]) == ("a:plex", "n:bridge.md")]
+        self.assertEqual([e["prov"] for e in hop], ["extracted"])
+        self.assertEqual(data["path"]["routes"][0]["confidence"], "extracted")
+
     def test_parse_path(self):
         self.assertEqual(search.parse_path("plex .. vaultwarden"), ("plex", "vaultwarden"))
         self.assertEqual(search.parse_path("path: plex .. vaultwarden"), ("plex", "vaultwarden"))

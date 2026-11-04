@@ -213,7 +213,9 @@ def _path(q):
     from . import graph  # graph imports parse_path above, so keep this local
     data = graph.build(q)
     by_id = {n["id"]: n for n in data.get("nodes") or []}
-    by_hop = {(e.get("a"), e.get("b")): e for e in data.get("edges") or []}
+    by_hop = {}
+    for e in sorted(data.get("edges") or [], key=lambda e: graph.PROV_RANK.get(e.get("prov"), 9)):
+        by_hop.setdefault((e.get("a"), e.get("b")), e)  # parallel hops: show the best-sourced one
     items = []
     for route in (data.get("path") or {}).get("routes") or []:
         ids = route.get("ids") or []

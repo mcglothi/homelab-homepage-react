@@ -296,12 +296,18 @@ def _path_routes(start, end, edges):
     return routes
 
 
+PROV_RANK = {"extracted": 0, "inferred": 1, "ambiguous": 2}
+
+
 def _path_graph(q, F, nodes, edges):
     ends = search.parse_path(q)
     warnings, ends_extra = [], {}
     start = _path_seed(ends[0], nodes, warnings, ends_extra)
     end = _path_seed(ends[1], nodes, warnings, ends_extra)
     payload = {"from": start, "to": end, "routes": []}
+    if start and start == end:
+        warnings.append("both ends are the same node")
+        start = end = None
     if not start or not end:
         return {"q": q, "nodes": [], "edges": [], "seeds": [], "listed": [], "matched": 0, "resolved": None, "truncated": False,
                 "coverage": {"list": 0, "covered": 0, "nodes": 0, "groups": []}, "warnings": warnings, "path": payload}
@@ -325,7 +331,11 @@ def _path_graph(q, F, nodes, edges):
                     bridge_nodes["n:" + nid]["label"] = title
             bridge_edges = (note_edges or []) + (joins or [])
     all_nodes = {**nodes, **bridge_nodes}
-    all_edges = _with_provenance(edges + bridge_edges)
+    # A note relation can arrive from both /mentions and /links; keep one per hop, the best-sourced
+    best = {}
+    for e in sorted(_with_provenance(edges + bridge_edges), key=lambda e: PROV_RANK.get(e["prov"], 9)):
+        best.setdefault((e["a"], e["b"], e["kind"]), e)
+    all_edges = list(best.values())
     routes = _path_routes(start, end, all_edges)
     payload["routes"] = [{k: v for k, v in route.items() if k != "edges"} for route in routes]
     if not routes:
