@@ -39,7 +39,7 @@ const trunc = (s, n = 22) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 // View settings that are remembered like the other graph controls (looks only; never what data is shown)
 // The lens part of a graph URL; YouTube notes join the concept lens only when asked for
 const lensQuery = e => (e.lens === 'concepts' ? '&lens=concepts' + (e.videos ? '&videos=1' : '') : '')
-const VIEW_KEYS = ['arrows', 'labels', 'backdrop', 'flow', 'panelMotion', 'color', 'size', 'curves', 'links', 'window', 'halfLife', 'lens', 'videos']
+const VIEW_KEYS = ['layout', 'arrows', 'labels', 'backdrop', 'flow', 'panelMotion', 'color', 'size', 'curves', 'links', 'window', 'halfLife', 'lens', 'videos']
 const loadView = () => { try { const j = JSON.parse(localStorage.getItem('docket.graph.view.v1')); return j && typeof j === 'object' ? Object.fromEntries(VIEW_KEYS.filter(k => j[k] !== undefined).map(k => [k, j[k]])) : {} } catch (e) { return {} } }
 // Backdrop tuning, remembered per Docket theme (and light/dark): star opacity, saturation, density, and the grid/rings intensity
 const BD_KEY = 'docket.graph.backdrop.v1'
@@ -68,10 +68,10 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
     window.addEventListener('docket:scale', on)
     return () => window.removeEventListener('docket:scale', on)
   }, [])
-  const [S, setS] = useState(() => ({ mode: '2d', lens: 'fleet', videos: false, cap: 14, kinds: {}, depth: 1, size: 'links', color: 'kind', gaps: false, topics: false, labels: 'smart', arrows: 'smart', backdrop: 'subtle', links: 'ends', curves: true, minLinks: 0, hideHubs: false, find: '', window: DEFAULT_WINDOW, halfLife: DEFAULT_HALF_LIFE,
+  const [S, setS] = useState(() => ({ mode: '2d', layout: 'free', lens: 'fleet', videos: false, cap: 14, kinds: {}, depth: 1, size: 'links', color: 'kind', gaps: false, topics: false, labels: 'smart', arrows: 'smart', backdrop: 'subtle', links: 'ends', curves: true, minLinks: 0, hideHubs: false, find: '', window: DEFAULT_WINDOW, halfLife: DEFAULT_HALF_LIFE,
     f: { center: 30, repel: 520, link: 55, dist: 95, layer: 35 }, panelMotion: 'calm', flow: { on: true, speed: 40, opacity: 55, sat: 60, density: 40 }, ...loadView() }))
   const set = useCallback(p => setS(s => ({ ...s, ...p })), [])
-  useEffect(() => { try { localStorage.setItem('docket.graph.view.v1', JSON.stringify(Object.fromEntries(VIEW_KEYS.map(k => [k, S[k]])))) } catch (e) { /* storage blocked */ } }, [S.arrows, S.labels, S.backdrop, S.flow, S.panelMotion, S.color, S.size, S.curves, S.links, S.window, S.halfLife, S.lens, S.videos]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { try { localStorage.setItem('docket.graph.view.v1', JSON.stringify(Object.fromEntries(VIEW_KEYS.map(k => [k, S[k]])))) } catch (e) { /* storage blocked */ } }, [S.layout, S.arrows, S.labels, S.backdrop, S.flow, S.panelMotion, S.color, S.size, S.curves, S.links, S.window, S.halfLife, S.lens, S.videos]) // eslint-disable-line react-hooks/exhaustive-deps
   const pm = panelMotion(S.panelMotion)
   const [bdAll, setBdAll] = useState(loadBd)
   const bdVals = { ...bdDefaults(theme.light), ...(bdAll[theme.id] || {}) }
@@ -418,7 +418,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
       const e = await creating.current[m]
       if (dead) return
       const cur = live.current
-      e.setVis({ sel: cur.sel, color: cur.S.color, gaps: cur.S.gaps ? cur.model.gap : null, find: cur.findSet, topics: cur.S.topics, links: cur.S.links, curves: cur.S.curves, labels: cur.S.labels, arrows: cur.S.arrows, focus: cur.focusKinds, seeds: cur.seeds, backdrop: cur.S.backdrop, isolate: cur.isoSet, bdv: cur.bdv, flow: cur.S.flow, backdropTop: cur.sideTop - 4, multiOrder: cur.multi, multi: new Set(cur.multi), pathSet: cur.sharedHl && cur.sharedHl.nodes, pathEdges: cur.sharedHl && cur.sharedHl.edges })
+      e.setVis({ sel: cur.sel, layout: cur.S.layout, color: cur.S.color, gaps: cur.S.gaps ? cur.model.gap : null, find: cur.findSet, topics: cur.S.topics, links: cur.S.links, curves: cur.S.curves, labels: cur.S.labels, arrows: cur.S.arrows, focus: cur.focusKinds, seeds: cur.seeds, backdrop: cur.S.backdrop, isolate: cur.isoSet, bdv: cur.bdv, flow: cur.S.flow, backdropTop: cur.sideTop - 4, multiOrder: cur.multi, multi: new Set(cur.multi), pathSet: cur.sharedHl && cur.sharedHl.nodes, pathEdges: cur.sharedHl && cur.sharedHl.edges })
       e.setModel(cur.model, grow.current)
       grow.current = false
       Object.entries(engines.current).forEach(([k, x]) => (k === m ? x.resume() : x.pause()))
@@ -430,8 +430,8 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
 
   useEffect(() => {
     const e = engines.current[S.mode]
-    if (e && model) e.setVis({ sel, color: S.color, gaps: S.gaps ? model.gap : null, find: findSet, topics: S.topics, links: S.links, curves: S.curves, labels: S.labels, arrows: S.arrows, focus: focusKinds, seeds, backdrop: S.backdrop, isolate: isoSet, bdv, flow: S.flow, backdropTop: sideTop - 4, multiOrder: multi, multi: new Set(multi), pathSet: sharedHl && sharedHl.nodes, pathEdges: sharedHl && sharedHl.edges })
-  }, [sel, multi, sharedHl, focusKinds, seeds, S.arrows, S.backdrop, isoSet, bdv, S.flow, sideTop, S.color, S.gaps, S.topics, S.links, S.curves, S.labels, findSet, model, S.mode])
+    if (e && model) e.setVis({ sel, layout: S.layout, color: S.color, gaps: S.gaps ? model.gap : null, find: findSet, topics: S.topics, links: S.links, curves: S.curves, labels: S.labels, arrows: S.arrows, focus: focusKinds, seeds, backdrop: S.backdrop, isolate: isoSet, bdv, flow: S.flow, backdropTop: sideTop - 4, multiOrder: multi, multi: new Set(multi), pathSet: sharedHl && sharedHl.nodes, pathEdges: sharedHl && sharedHl.edges })
+  }, [S.layout, sel, multi, sharedHl, focusKinds, seeds, S.arrows, S.backdrop, isoSet, bdv, S.flow, sideTop, S.color, S.gaps, S.topics, S.links, S.curves, S.labels, findSet, model, S.mode])
   useEffect(() => { Object.values(engines.current).forEach(e => e.setTheme(theme)) }, [theme])
   useEffect(() => { engines.current[S.mode]?.setForces(S.f) }, [S.f, S.mode])
   useEffect(() => {
@@ -492,6 +492,13 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
     const victim = open.filter(p => !ui.pinned[p.id]).sort((x, y) => openedAt.current[x.id] - openedAt.current[y.id])[0]
     if (victim) dismiss(victim.id)
   }, [shown, ui.pinned, boxW, dismiss])
+  // Pinned panels act docked: the graph is framed in the room between them, not under them. Peeks and the panels
+  // that follow the selection do not move the camera (that would jump on every click).
+  useEffect(() => {
+    const lay = layoutPanels(shown, boxW)
+    const edge = side => Math.max(0, ...PANELS.filter(p => p.side === side && ui.pinned[p.id] && shown[p.id] && lay[p.id]).map(p => lay[p.id].offset + lay[p.id].width))
+    engines.current[S.mode]?.setPad(edge('left'), edge('right'))
+  }, [shown, ui.pinned, boxW, S.mode, ready])
   const selRef = useRef(null)
   selRef.current = sel
   const onEsc = useCallback(() => {
@@ -667,8 +674,13 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
     {S.lens === 'concepts' && <Button size="sm" variant={S.videos ? 'primary' : 'default'} onClick={() => changeLens('concepts', !S.videos)}
       title="Include the YouTube video notes (media/youtube/); off, the graph is your own notes">Videos</Button>}
   </>
+  // Clusters: each community gathers in its own labeled area (colored by community, Topics halos on). 2D only.
+  const layoutSeg = <Seg value={S.layout} onChange={v => set(v === 'clusters' ? { layout: v, color: 'comm', topics: true } : { layout: v })}
+    title="Free: one shared layout. Clusters: each community in its own labeled area (2D)"
+    opts={[['free', 'Layout: free'], ['clusters', 'Clusters', 'Each community gathers in its own area, biggest in the middle']]} />
   const quick = (
     <>
+      {layoutSeg}
       <Seg value={S.color} onChange={v => set({ color: v })} opts={[['kind', 'Color: kind'], ['comm', 'Color: community', 'Clusters found by modularity']]} />
       <Seg value={S.size} onChange={v => set({ size: v })} title="Size nodes by" opts={[['links', 'Size: links', 'Bigger node = more links'], ['infl', 'Size: influence', 'Bigger node = more shortest paths run through it']]} />
       <Seg value={S.labels} onChange={v => set({ labels: v })} title="How many labels: Off shows only the node you point at or pick, Smart fits as many as have room (more as you zoom in), More packs them tighter" opts={[['off', 'Labels: off'], ['smart', 'Smart'], ['more', 'More']]} />
