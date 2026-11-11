@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from homeapi import appearance, auth, graph, mirror, routes, search  # noqa: E402
+from homeapi import appearance, auth, graph, ideas, mirror, routes, search  # noqa: E402
 from homeapi.common import REPO, request, setting  # noqa: E402
 
 DIST = REPO / "dist"
@@ -135,6 +135,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._search_stream(q.get("q"), q.get("scope"))
             if path == "/api/search":
                 return self._api(lambda: search.search(q.get("q"), q.get("mode", "fast"), q.get("scope")))
+            if path == "/api/ideas":
+                return self._api(ideas.get)
             if path == "/api/auth":
                 return self._api(lambda: auth.refresh() if q.get("fresh") == "1" else auth.get())
             if path == "/api/appearance":

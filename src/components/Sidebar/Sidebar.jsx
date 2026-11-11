@@ -6,11 +6,12 @@ import { AdGuardDonut } from './AdGuardDonut'
 import { NetworkStats } from './NetworkStats'
 import { QuickLinks } from './QuickLinks'
 import { NeedsAttention } from './NeedsAttention'
+import { IdeasCard } from './IdeasCard'
 import { C, alpha } from '../../ui/theme'
 import { SectionsProvider, SectionsBar } from './Section'
 
 // Section ids, as each widget names itself (StatTiles has no title, so it always shows)
-const SECTIONS = ['Needs Attention', 'Releases', 'Grafana', 'Power', 'AdGuard', 'Network', 'Quick Links']
+const SECTIONS = ['Needs Attention', 'Ideas', 'Releases', 'Grafana', 'Power', 'AdGuard', 'Network', 'Quick Links']
 
 export function Sidebar({ accent, apiData }) {
   return (
@@ -23,6 +24,7 @@ export function Sidebar({ accent, apiData }) {
     }}>
       <SectionsBar />
       <NeedsAttention accent={accent} />
+      <IdeasCard accent={accent} />
       <StatTiles adguard={apiData?.adguard} weather={apiData?.weather} />
       <CalendarWidget accent={accent} events={apiData?.calendarEvents} />
       <GrafanaWidget accent={accent} data={apiData?.grafana} />
