@@ -3,7 +3,7 @@
 // and size, color, opacity and label visibility ease toward targets every frame. Nothing
 // here rebuilds the scene when a filter, search, expansion, option or theme changes.
 
-import { adjacency } from './analysis'
+import { adjacency, clusterAnchors } from './analysis'
 
 const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
@@ -183,6 +183,7 @@ class Engine {
     this.gapPairs = []
     for (let i = 0; i < big.length; i++) for (let j = i + 1; j < big.length; j++) this.gapPairs.push([big[i], big[j], inter[Math.min(big[i], big[j]) + '-' + Math.max(big[i], big[j])] || 0])
     this.gapPairs = this.gapPairs.sort((a, b) => a[2] - b[2]).slice(0, 2)
+    this.placeClusters(model)
     const keep = new Set()
     const pos = id => { const n = this.store.get(id); return n && n.a > 0.05 && Number.isFinite(n.x) ? n : null }
     let born = 0
@@ -276,6 +277,7 @@ class Engine {
     const colorChanged = v.color !== undefined && v.color !== this.vis.color
     const curvesChanged = v.curves !== undefined && v.curves !== this.vis.curves
     const flowChanged = v.flow !== undefined && v.flow !== this.vis.flow
+    const layoutChanged = v.layout !== undefined && v.layout !== this.vis.layout
     const hadSel = this.vis.sel
     this.vis = { ...this.vis, ...v }
     if (hadSel && v.sel !== undefined && !v.sel) this.releaseFocus()
@@ -284,7 +286,20 @@ class Engine {
     if (v.multiOrder) { this.multiIdx = new Map(v.multiOrder.map((id, i) => [id, i])) }
     if (colorChanged) this.retarget()
     if (curvesChanged && this.mode === '3d') this.G.linkCurvature(l => this.curve(l))
+    if (layoutChanged) {
+      this.autoFit = true
+      this.applyForces()
+      try { this.G.d3ReheatSimulation() } catch { /* not ready */ }
+    }
     this.computeHl()
+  }
+
+  // Room the pinned side panels take (px). The canvas keeps its size (nothing re-lays out); fitting frames the
+  // graph in the space left between them instead of under them.
+  setPad(l, r) {
+    if (this.pad && this.pad.l === l && this.pad.r === r) return
+    this.pad = { l, r }
+    if (this.mode === '2d' && this.store.size) this.fit(600)
   }
 
   computeHl() {
@@ -302,6 +317,21 @@ class Engine {
     this.linksDirty = performance.now()
   }
 
+  // Clusters layout: every community of 3+ nodes gets its own spot (biggest in the middle, the rest on rings), and
+  // a spot survives re-counts that renumber the communities (see clusterAnchors).
+  placeClusters(model = this.model) {
+    if (!model) return
+    const by = new Map()
+    model.nodes.forEach(n => { if (!by.has(n.comm)) by.set(n.comm, []); by.get(n.comm).push(n.id) })
+    const biggest = Math.max(1, ...[...by.values()].map(a => a.length))
+    const spacing = Math.max(220, this.f.dist * 2.4 + 22 * Math.sqrt(biggest))
+    this.anchors = clusterAnchors([...by.entries()].map(([comm, members]) => ({ comm, members })), this.anchors || new Map(), spacing)
+    this.anchorOf = new Map()
+    for (const a of this.anchors.values()) for (const id of a.members) this.anchorOf.set(id, a)
+  }
+
+  clustered() { return this.vis.layout === 'clusters' && this.mode === '2d' }
+
   // ── forces ──────────────────────────────────────────────────────────────
   installForces() {
     const eng = this
@@ -313,6 +343,14 @@ class Engine {
       const ky = (f.layer / 100) * 0.35 * alpha * (eng.heat ?? 1)
       const gap = f.dist * 0.95
       const sgn = eng.mode === '3d' ? -1 : 1
+      if (eng.clustered()) {   // each community pulls toward its own spot; loose nodes toward the middle; no layering
+        const kc = 0.1 * alpha * (eng.heat ?? 1)
+        for (const n of ns) {
+          const a = eng.anchorOf?.get(n.id)
+          if (a) { n.vx += (a.x - (n.x || 0)) * kc; n.vy += (a.y - (n.y || 0)) * kc } else { n.vx -= (n.x || 0) * k; n.vy -= (n.y || 0) * k }
+        }
+        return
+      }
       for (const n of ns) {
         n.vx -= (n.x || 0) * k; n.vy -= (n.y || 0) * k; if (n.z !== undefined) n.vz -= n.z * k
         if (ky > 0 && n.depth !== undefined) n.vy += (sgn * n.depth * gap - (n.y || 0)) * ky
@@ -330,7 +368,9 @@ class Engine {
     if (ch) ch.strength(n => -f.repel * sc * heat * (0.4 + (n.tr || 5) / 8)).distanceMax(900)
     const lk = this.G.d3Force('link')
     const deg = n => (typeof n === 'object' ? n.deg || 1 : 1)
-    if (lk) lk.distance(l => f.dist + 7 * Math.sqrt(Math.max(deg(l.source), deg(l.target)))).strength(l => (f.link / 55) * 0.7 * heat / Math.sqrt(Math.min(deg(l.source), deg(l.target))))
+    // clusters: links between communities pull weakly, so each community keeps to its own area
+    const across = l => (this.clustered() && typeof l.source === 'object' && l.source.comm !== l.target.comm ? 0.12 : 1)
+    if (lk) lk.distance(l => f.dist + 7 * Math.sqrt(Math.max(deg(l.source), deg(l.target)))).strength(l => (f.link / 55) * 0.7 * heat * across(l) / Math.sqrt(Math.min(deg(l.source), deg(l.target))))
   }
 
   setForces(f) {
@@ -351,7 +391,18 @@ class Engine {
   }
 
   fit(ms = 900) {
-    if (this.mode === '2d') { this.G.zoomToFit(ms, 70, this.fitFilter()); return }
+    if (this.mode === '2d') {
+      const pl = this.pad?.l || 0, pr = this.pad?.r || 0
+      if (!pl && !pr) { this.G.zoomToFit(ms, 70, this.fitFilter()); return }
+      const bb = this.G.getGraphBbox(this.fitFilter())
+      if (!bb) return
+      const W = this.G.width(), H = this.G.height(), p = 70
+      const k = Math.min((W - pl - pr - 2 * p) / Math.max(1, bb.x[1] - bb.x[0]), (H - 2 * p) / Math.max(1, bb.y[1] - bb.y[0]), 8)
+      if (!(k > 0)) return
+      this.G.centerAt((bb.x[0] + bb.x[1]) / 2 + (pr - pl) / (2 * k), (bb.y[0] + bb.y[1]) / 2, ms)
+      this.G.zoom(k, ms)
+      return
+    }
     // 3D: frame the nodes' own bounds. (The library's box also counts the text labels, whose world size grows with
     // the camera distance, so a far camera made the box bigger, which sent the camera further out.)
     const f = this.fitFilter()
@@ -487,7 +538,7 @@ class Engine {
       if (n.start && now < n.start) continue
       const dim = hl && !hl.has(n.id)
       n.a += ((n.dying ? 0 : dim ? 0.12 : 1) - n.a) * ka
-      n.r += ((n.dying ? 0 : (n.tr || 0) * recSize(n.rk) * (0.84 + 0.16 * (n.fo ?? 1)) * (this.vis.seeds && this.vis.seeds.has(n.id) ? 2.2 : 1) * (1 + 0.4 * (n.sg || 0))) - n.r) * kr
+      n.r += ((n.dying ? 0 : (n.tr || 0) * recSize(n.rk) * (0.84 + 0.16 * (n.fo ?? 1)) * (this.vis.seeds && this.vis.seeds.has(n.id) ? (this.clustered() ? 1.4 : 2.2) : 1) * (this.clustered() ? 0.8 : 1) * (1 + 0.4 * (n.sg || 0))) - n.r) * kr
       // focus: kinds outside it recede (render only: opacity, saturation, size, labels), none of it touches the layout
       const fo = !this.vis.focus || this.vis.focus.size === 0 || this.vis.focus.has(n.kind) ? 1 : 0
       n.fo = (n.fo ?? 1) + (fo - (n.fo ?? 1)) * kf
@@ -787,9 +838,10 @@ class Engine {
     ctx.save()
     ctx.globalAlpha = n.a * fa
     if (!T.light && (this.store.size < 400 || n.sa > 0.05 || n.id === this.hoverId)) {
-      const g = ctx.createRadialGradient(n.x, n.y, r * 0.2, n.x, n.y, r * 3.2)
-      g.addColorStop(0, `rgba(${c},.4)`); g.addColorStop(1, `rgba(${c},0)`)
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(n.x, n.y, r * 3.2, 0, 6.2832); ctx.fill()
+      const gr = this.clustered() ? 1.8 : 3.2   // clusters: the community halo carries the weight, so nodes glow less
+      const g = ctx.createRadialGradient(n.x, n.y, r * 0.2, n.x, n.y, r * gr)
+      g.addColorStop(0, `rgba(${c},${this.clustered() ? 0.28 : 0.4})`); g.addColorStop(1, `rgba(${c},0)`)
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(n.x, n.y, r * gr, 0, 6.2832); ctx.fill()
     }
     if (n.missing) {
       ctx.setLineDash([3, 3]); ctx.strokeStyle = `rgb(${c})`; ctx.lineWidth = 1.6; ctx.fillStyle = T.bg
@@ -839,11 +891,11 @@ class Engine {
   // Topics lens (2D): a soft halo behind each community with its lead name, and the weakest ties between
   // communities drawn as dashed "gap" lines: where the structure is thin.
   drawTopics(ctx, k) {
-    if (!this.vis.topics) return
+    if (!this.vis.topics && !this.clustered()) return   // clusters always label their areas
     const T = this.T
     const by = new Map()
     for (const n of this.store.values()) if (!n.dying && n.a > 0.3 && Number.isFinite(n.x)) { if (!by.has(n.comm)) by.set(n.comm, []); by.get(n.comm).push(n) }
-    const top = [...by.entries()].filter(([, a]) => a.length >= 3).sort((x, y) => y[1].length - x[1].length).slice(0, 6)
+    const top = [...by.entries()].filter(([, a]) => a.length >= 3).sort((x, y) => y[1].length - x[1].length).slice(0, this.clustered() ? 12 : 6)
     const cen = new Map()
     for (const [c, arr] of top) {
       const cx = arr.reduce((s, n) => s + n.x, 0) / arr.length, cy = arr.reduce((s, n) => s + n.y, 0) / arr.length

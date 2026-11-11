@@ -364,3 +364,43 @@ export function suggestions(model, q, n = 5) {
   if (model?.lens === 'concepts' || nodes.some(x => x.kind === 'concept')) nodes.filter(x => x.kind === 'concept' && x.label.toLowerCase() !== text).slice().sort((a, b) => (b.count || 0) - (a.count || 0) || (b.deg || 0) - (a.deg || 0)).forEach(x => add(`kb: ${x.label}`))
   return out
 }
+
+// Clusters layout: one fixed spot per community, so each one gathers in its own area (the biggest in the middle,
+// the rest on rings around it). `groups` is [{ comm, members: [ids] }]; only groups of `min`+ members get a spot.
+// `prev` is the last result: a community that keeps most of an old one's members keeps that old spot, so expanding
+// a node does not reshuffle the whole picture (community numbers change on every recount; members do not).
+// Returns Map(comm -> { x, y, members: Set }).
+export function clusterAnchors(groups, prev = new Map(), spacing = 300, min = 3) {
+  const big = groups.filter(g => g.members.length >= min).sort((a, b) => b.members.length - a.members.length || String(a.comm).localeCompare(String(b.comm)))
+  const slot = i => {
+    if (i === 0) return { x: 0, y: 0 }
+    let ring = 1, first = 1
+    while (i >= first + 6 * ring) { first += 6 * ring; ring++ }
+    const k = i - first, cap = 6 * ring, a = (k / cap) * 2 * Math.PI + (ring % 2 ? 0 : Math.PI / cap)
+    return { x: Math.round(Math.cos(a) * spacing * ring), y: Math.round(Math.sin(a) * spacing * ring) }
+  }
+  const out = new Map(), taken = new Set()
+  const old = [...prev.values()]
+  const key = p => `${p.x},${p.y}`
+  for (const g of big) {   // keep the spot of the old community this one overlaps most (more than half of it)
+    let best = null, bestN = 0
+    for (const p of old) {
+      if (taken.has(key(p))) continue
+      const n = g.members.reduce((s, id) => s + (p.members.has(id) ? 1 : 0), 0)
+      if (n > bestN) { best = p; bestN = n }
+    }
+    if (best && bestN * 2 > Math.min(best.members.size, g.members.length)) {
+      out.set(g.comm, { x: best.x, y: best.y, members: new Set(g.members) })
+      taken.add(key(best))
+    }
+  }
+  let i = 0
+  for (const g of big) {
+    if (out.has(g.comm)) continue
+    while (taken.has(key(slot(i)))) i++
+    const s = slot(i)
+    taken.add(key(s))
+    out.set(g.comm, { ...s, members: new Set(g.members) })
+  }
+  return out
+}

@@ -3,7 +3,8 @@ import { C, MONO, alpha } from '../../ui/theme'
 import { EASE } from '../../ui/motion'
 
 // Icon rails and flyout panels for the graph. Panels float over the canvas: opening, closing or pinning one never
-// changes the canvas size, so nothing re-lays out. Left rail = tools (Controls, Filters), right rail = what you are
+// changes the canvas size, so nothing re-lays out. A pinned panel acts docked all the same: the engine frames the
+// graph in the room left beside it (engine.setPad), so the graph is not hidden under it. Left rail = tools (Controls, Filters), right rail = what you are
 // looking at (Details, Compare, Insights, Legend). State (open, pinned) is remembered per browser.
 
 export const PANELS = [

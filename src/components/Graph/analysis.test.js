@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { initialOrder, capGroups, rankGroup, recScore, decay, foldSummary, agoText, isDated, diversity, modularity, surprising, suggestions } from './analysis.js'
+import { initialOrder, capGroups, rankGroup, recScore, decay, foldSummary, agoText, isDated, diversity, modularity, surprising, suggestions, clusterAnchors } from './analysis.js'
 
 const NOW = Date.parse('2026-11-04T12:00:00Z')
 const DAY = 86400000
@@ -168,4 +168,31 @@ test('surprising picks hubs among real bridges only', () => {
   ]
   const edges = [{ a: 'hub', b: 'b', label: 'hub link' }, { a: 'a', b: 'b', label: 'plain' }]
   assert.deepEqual(surprising(nodes, edges).map(x => x.label), ['plain'])
+})
+
+test('clusters: biggest community in the middle, others on a ring, small ones get no spot', () => {
+  const g = (comm, n, p = comm) => ({ comm, members: Array.from({ length: n }, (_, i) => `${p}${i}`) })
+  const a = clusterAnchors([g(1, 4), g(0, 9), g(2, 2), g(3, 3)], new Map(), 100)
+  assert.deepEqual([a.get(0).x, a.get(0).y], [0, 0])
+  assert.equal(a.has(2), false)                                  // a pair stays loose
+  assert.equal(Math.round(Math.hypot(a.get(1).x, a.get(1).y)), 100)
+  assert.equal(Math.round(Math.hypot(a.get(3).x, a.get(3).y)), 100)
+  assert.notDeepEqual([a.get(1).x, a.get(1).y], [a.get(3).x, a.get(3).y])
+})
+
+test('clusters: spots are distinct and fill a second ring after six', () => {
+  const groups = Array.from({ length: 9 }, (_, c) => ({ comm: c, members: Array.from({ length: 20 - c }, (_, i) => `${c}-${i}`) }))
+  const a = clusterAnchors(groups, new Map(), 100)
+  const spots = [...a.values()].map(p => `${p.x},${p.y}`)
+  assert.equal(new Set(spots).size, 9)
+  assert.equal([...a.values()].filter(p => Math.abs(Math.hypot(p.x, p.y) - 200) < 2).length, 2)
+})
+
+test('clusters: renumbered communities keep their old spots when expanded', () => {
+  const g = (comm, ids) => ({ comm, members: ids })
+  const first = clusterAnchors([g(0, ['a', 'b', 'c', 'd', 'e']), g(1, ['p', 'q', 'r'])], new Map(), 100)
+  // the second community grew past the first, so the recount swaps their numbers
+  const next = clusterAnchors([g(0, ['p', 'q', 'r', 's', 't', 'u']), g(1, ['a', 'b', 'c', 'd', 'e'])], first, 100)
+  assert.deepEqual([next.get(1).x, next.get(1).y], [first.get(0).x, first.get(0).y])
+  assert.deepEqual([next.get(0).x, next.get(0).y], [first.get(1).x, first.get(1).y])
 })
