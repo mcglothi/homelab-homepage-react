@@ -40,7 +40,7 @@ def load_search(root):
 
 
 PATH_MAX = 10
-PATH_STOP = set("a an and are for how i in is it me my of on or s the to we with".split())
+PATH_STOP = set("a an and are do for how i in is it me my of on or s the to we with".split())
 
 
 def _words(text):

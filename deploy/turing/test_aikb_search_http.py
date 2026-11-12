@@ -123,6 +123,8 @@ pending:
         self.assertEqual(status, 200)
         self.assertEqual([r["file"] for r in body["results"]], ["notes/three.md", "notes/one.md", "notes/two.md"])
         self.assertEqual(body["results"][0]["sources"], ["path"])
+        status, body = self.request("/search?q=how+do+i+three+notes")   # question words don't block the filename match
+        self.assertEqual(body["results"][0]["file"], "notes/three.md")
         status, body = self.request("/search?q=two")   # already a hit: moved up, not duplicated
         self.assertEqual([r["file"] for r in body["results"]], ["notes/two.md", "notes/one.md"])
 
