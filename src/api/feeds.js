@@ -9,11 +9,23 @@ export async function getJSON(url) {
   return r.json()
 }
 
-export async function postJSON(url) {
-  const r = await fetch(url, { method: 'POST' })
+export async function postJSON(url, payload) {
+  const r = await fetch(url, send(payload, 'POST'))
   const body = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(body.error || `${r.status}`)
   return body
+}
+
+export async function patchJSON(url, payload) {
+  const r = await fetch(url, send(payload, 'PATCH'))
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error || `${r.status}`)
+  return body
+}
+
+function send(payload, method) {
+  if (payload === undefined) return { method }
+  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
 }
 
 // { data, error, loading, reload } — keeps the last good data when a poll fails,
