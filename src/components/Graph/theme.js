@@ -26,7 +26,7 @@ export function readTheme() {
   t.id = (document.documentElement.dataset.themeId || 'home') + '|' + (t.light ? 'light' : 'dark')
   t.kind = {
     host: t.blue, pool: t.violet, dataset: t.violet, app: t.cyan, service: t.muted, proxy: t.orange, dns: t.green,
-    network: t.amber, target: t.dim, alert: t.red, cert: t.amber, incident: t.red, pending: t.violet, viewer: t.cyan, device: t.blue, title: t.green, video: t.red, channel: t.amber, note: t.violet, query: t.accent, concept: t.green,
+    network: t.amber, target: t.dim, alert: t.red, cert: t.amber, incident: t.red, pending: t.violet, viewer: t.cyan, device: t.blue, title: t.green, video: t.red, channel: t.amber, note: t.violet, section: t.violet, query: t.accent, concept: t.green,
   }
   t.comm = [t.blue, t.green, t.orange, t.violet, t.cyan, t.amber, t.accent, t.red]
   t.rel = { owner: t.violet, runs: t.cyan, net: t.orange, member: t.muted, mgr: t.accent, group: t.violet, monitor: t.dim, named: t.blue, inferred: t.violet, candidate: t.accent, support: t.violet, reported: t.orange, calls: t.blue, targets: t.cyan, ran: t.dim, describes: t.muted, about: t.orange, found: t.dim, cooccur: t.green }

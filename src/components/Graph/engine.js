@@ -3,7 +3,7 @@
 // and size, color, opacity and label visibility ease toward targets every frame. Nothing
 // here rebuilds the scene when a filter, search, expansion, option or theme changes.
 
-import { adjacency, clusterAnchors } from './analysis'
+import { adjacency, clusterAnchors, levelPull } from './analysis'
 
 const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
@@ -23,6 +23,24 @@ async function libs(mode) {
 // old ones fade slightly; undated nodes sit in the middle so nothing disappears.
 const recFade = rk => (rk == null ? 0.85 : 0.6 + 0.4 * Math.min(1, rk / 0.5))
 const recSize = rk => (rk == null ? 1 : 0.92 + 0.16 * Math.min(1, rk / 0.5))
+
+// Where a community's nodes start on first placement: community i (0 = biggest) sits on a golden-angle spiral, at a
+// radius that grows with sqrt(i) so the regions neither overlap much nor drift far. Cached per model.
+const GOLDEN = Math.PI * (3 - Math.sqrt(5))
+function commSeed(comm, model, dist) {
+  if (!model.__seed || model.__seedDist !== dist) {
+    const size = {}
+    model.nodes.forEach(n => { size[n.comm] = (size[n.comm] || 0) + 1 })
+    const order = Object.keys(size).sort((a, b) => size[b] - size[a])
+    const big = Math.sqrt(size[order[0]] || 1)
+    model.__seed = new Map(order.map((c, i) => {
+      const r = i === 0 ? 0 : dist * (1.2 + 0.9 * big) * Math.sqrt(i)
+      return [String(c), { x: Math.cos(i * GOLDEN) * r, y: Math.sin(i * GOLDEN) * r }]
+    }))
+    model.__seedDist = dist
+  }
+  return model.__seed.get(String(comm)) || { x: 0, y: 0 }
+}
 
 export async function createEngine(mode, el, cb, theme, seed) {
   const L = await libs(mode)
@@ -52,6 +70,9 @@ class Engine {
     this.autoFit = true      // keep re-framing as the layout settles, until the user moves the camera
     this.linkCache = new Map()
     this.frame = 0
+    this.commNames = new Map()   // cluster member key -> model-given name
+    this.namesTried = new Set()
+    if (import.meta.env?.DEV) window.__graphEngine = this   // dev only: inspect layouts from the console
     const w = el.clientWidth || 800
     const h = el.clientHeight || 600
     const click = (n, ev) => {
@@ -171,6 +192,7 @@ class Engine {
 
   // ── data ────────────────────────────────────────────────────────────────
   setModel(model, grow) {
+    this.modelAt = performance.now()
     const now = performance.now()
     this.model = model
     this.adj = adjacency(model.edges)
@@ -200,7 +222,12 @@ class Engine {
           const c = near.reduce((s, o) => ({ x: s.x + o.x / near.length, y: s.y + (o.y || 0) / near.length, z: s.z + (o.z || 0) / near.length }), { x: 0, y: 0, z: 0 })
           n.x = c.x + jit(); n.y = c.y + jit(); n.z = this.mode === '3d' ? c.z + jit() : undefined
         } else if (sd) { n.x = sd.x; n.y = sd.y; n.z = this.mode === '3d' ? (Math.random() - 0.5) * 60 : undefined }
-        else { n.x = jit() * 6; n.y = jit() * 6; n.z = this.mode === '3d' ? jit() * 6 : undefined }
+        else {
+          // no placed neighbor: start inside its community's region (communities spread on a golden-angle spiral,
+          // biggest first), so the simulation refines a sensible picture instead of untangling a random one
+          const sp = commSeed(m.comm, model, this.f?.dist || 60)
+          n.x = sp.x + jit() * 1.5; n.y = sp.y + jit() * 1.5; n.z = this.mode === '3d' ? jit() * 3 : undefined
+        }
         this.store.set(m.id, n)
       }
       n.dying = 0
@@ -278,6 +305,7 @@ class Engine {
     const curvesChanged = v.curves !== undefined && v.curves !== this.vis.curves
     const flowChanged = v.flow !== undefined && v.flow !== this.vis.flow
     const layoutChanged = v.layout !== undefined && v.layout !== this.vis.layout
+    if (v.find !== undefined && v.find !== this.vis.find && v.find && v.find.size) this.findAt = performance.now()   // search hits pulse once
     const hadSel = this.vis.sel
     this.vis = { ...this.vis, ...v }
     if (hadSel && v.sel !== undefined && !v.sel) this.releaseFocus()
@@ -349,6 +377,11 @@ class Engine {
           const a = eng.anchorOf?.get(n.id)
           if (a) { n.vx += (a.x - (n.x || 0)) * kc; n.vy += (a.y - (n.y || 0)) * kc } else { n.vx -= (n.x || 0) * k; n.vy -= (n.y || 0) * k }
         }
+        return
+      }
+      const lay = eng.mode === '2d' ? eng.vis.layout : null
+      if (lay === 'tree' || lay === 'rings') {   // strict levels by depth: rows (tree) or rings around the top level
+        levelPull(ns, lay, gap, k, (lay === 'rings' ? 0.9 : 0.5) * alpha * (eng.heat ?? 1))   // strong: charge here is ~20x d3's default
         return
       }
       for (const n of ns) {
@@ -538,7 +571,7 @@ class Engine {
       if (n.start && now < n.start) continue
       const dim = hl && !hl.has(n.id)
       n.a += ((n.dying ? 0 : dim ? 0.12 : 1) - n.a) * ka
-      n.r += ((n.dying ? 0 : (n.tr || 0) * recSize(n.rk) * (0.84 + 0.16 * (n.fo ?? 1)) * (this.vis.seeds && this.vis.seeds.has(n.id) ? (this.clustered() ? 1.4 : 2.2) : 1) * (this.clustered() ? 0.8 : 1) * (1 + 0.4 * (n.sg || 0))) - n.r) * kr
+      n.r += ((n.dying ? 0 : (n.tr || 0) * recSize(n.rk) * (0.84 + 0.16 * (n.fo ?? 1)) * (this.vis.seeds && this.vis.seeds.has(n.id) ? (this.clustered() ? 1.4 : 2.2) : 1) * (this.clustered() ? 0.8 : 1) * (1 + 0.4 * (n.sg || 0)) * (hl ? (dim ? 0.6 : 1.2) : 1)) - n.r) * kr   // highlight: the set grows a little, the rest shrinks
       // focus: kinds outside it recede (render only: opacity, saturation, size, labels), none of it touches the layout
       const fo = !this.vis.focus || this.vis.focus.size === 0 || this.vis.focus.has(n.kind) ? 1 : 0
       n.fo = (n.fo ?? 1) + (fo - (n.fo ?? 1)) * kf
@@ -851,6 +884,17 @@ class Engine {
       ctx.strokeStyle = T.bg; ctx.lineWidth = Math.min(1.4, r * 0.3); ctx.stroke()   // a thin ring in the page color keeps overlapping nodes apart
     }
     if (n.result && r > 3 && this.store.size < 200 && !(this.vis.seeds && this.vis.seeds.has(n.id))) { ctx.strokeStyle = T.accent; ctx.globalAlpha = n.a * 0.4; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.arc(n.x, n.y, r + 2.5, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = n.a }
+    if (this.findAt && !this.still && this.vis.find && this.vis.find.has(n.id)) {   // search hits: two ripples spread out and fade (~1.6 s)
+      const age = (this.now - this.findAt) / 1600
+      if (age < 1) for (const off of [0, 0.3]) {
+        const p = age - off
+        if (p <= 0 || p >= 0.7) continue
+        const q = p / 0.7
+        ctx.strokeStyle = T.accent; ctx.globalAlpha = n.a * 0.7 * (1 - q); ctx.lineWidth = 1.6 / Math.max(0.5, k)
+        ctx.beginPath(); ctx.arc(n.x, n.y, r + 2 + q * 16 / Math.max(0.5, k), 0, 6.2832); ctx.stroke()
+      }
+      ctx.globalAlpha = n.a
+    }
     if (n.hop && r > 3) { ctx.strokeStyle = this.seedCss(); ctx.globalAlpha = n.a * Math.max(0.18, 0.6 - n.hop * 0.1); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(n.x, n.y, r + 2.5 + n.hop, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = n.a }
     const mk = this.markerKind(n)
     if (mk && r > 1.5) {
@@ -888,6 +932,24 @@ class Engine {
     ctx.restore()
   }
 
+  // Cluster names from the model loaded on Hopper (POST /api/graph/names), asked for once per set of members and
+  // only while the layout has settled. Until a name arrives, or if Hopper is down, the lead node's label stands in.
+  wantNames(list) {
+    const now = performance.now()
+    if (this.namesBusy || now < (this.namesRetry || 0) || now - (this.modelAt || 0) < 1500) return   // wait for fade-ins: partial clusters would waste a call
+    this.namesBusy = true
+    const batch = list.slice(0, 16)
+    fetch('/api/graph/names', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clusters: batch.map(t => ({ names: t.names })) }) })
+      .then(r => r.json())
+      .then(j => {
+        const by = j.by_index || {}
+        batch.forEach((t, i) => { this.namesTried.add(t.key); if (by[i]) this.commNames.set(t.key, by[i]) })
+        if (!j.by_index) this.namesRetry = performance.now() + 60000
+      })
+      .catch(() => { this.namesRetry = performance.now() + 60000 })
+      .finally(() => { this.namesBusy = false })
+  }
+
   // Topics lens (2D): a soft halo behind each community with its lead name, and the weakest ties between
   // communities drawn as dashed "gap" lines: where the structure is thin.
   drawTopics(ctx, k) {
@@ -897,6 +959,14 @@ class Engine {
     for (const n of this.store.values()) if (!n.dying && n.a > 0.3 && Number.isFinite(n.x)) { if (!by.has(n.comm)) by.set(n.comm, []); by.get(n.comm).push(n) }
     const top = [...by.entries()].filter(([, a]) => a.length >= 3).sort((x, y) => y[1].length - x[1].length).slice(0, this.clustered() ? 12 : 6)
     const cen = new Map()
+    const fresh = this.frame % 30 === 0 || !this.topicKeys
+    let members = null   // whole communities, dimmed nodes included: a highlight must not rename a cluster
+    if (fresh) {
+      this.topicKeys = new Map()
+      members = new Map()
+      for (const n of this.store.values()) if (!n.dying) { if (!members.has(n.comm)) members.set(n.comm, []); members.get(n.comm).push(n) }
+    }
+    const missing = []
     for (const [c, arr] of top) {
       const cx = arr.reduce((s, n) => s + n.x, 0) / arr.length, cy = arr.reduce((s, n) => s + n.y, 0) / arr.length
       const rad = Math.max(...arr.map(n => Math.hypot(n.x - cx, n.y - cy))) + 26
@@ -906,9 +976,17 @@ class Engine {
       g.addColorStop(0, `rgba(${col},${T.light ? 0.1 : 0.13})`); g.addColorStop(1, `rgba(${col},0)`)
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, rad, 0, 6.2832); ctx.fill()
       const lead = arr.reduce((b, n) => (n.val > b.val ? n : b), arr[0])
+      if (fresh) {   // the cluster's best-known members name it; the same members keep the same name across re-counts
+        const names = (members.get(c) || arr).slice().sort((x, y) => (y.val || 0) - (x.val || 0)).slice(0, 8).map(n => n.label)
+        this.topicKeys.set(c, { names, key: names.slice().sort().join('\n') })
+      }
+      const tk = this.topicKeys.get(c)
+      const named = tk && this.commNames.get(tk.key)
+      if (tk && !named && !this.namesTried.has(tk.key)) missing.push(tk)
       ctx.font = `700 ${clamp(12 / k, 4, 40)}px Manrope, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.fillStyle = `rgba(${col},.85)`; ctx.fillText(`${lead.label} · ${arr.length}`, cx, cy - rad * 0.82)
+      ctx.fillStyle = `rgba(${col},.85)`; ctx.fillText(named ? `${named} · ${arr.length}` : `${lead.label} · ${arr.length}`, cx, cy - rad * 0.82)
     }
+    if (missing.length) this.wantNames(missing)
     for (const [a, b, links] of this.gapPairs || []) {
       const A = cen.get(a), B = cen.get(b)
       if (!A || !B) continue

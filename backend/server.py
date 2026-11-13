@@ -154,7 +154,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.command in ("POST", "DELETE") and not self._same_origin():
             return self._send_json({"error": "cross-origin request refused"}, HTTPStatus.FORBIDDEN)
         if self.command == "POST" and path in routes.POST:
-            if path == "/api/graph/explain":
+            if path in ("/api/graph/explain", "/api/graph/names", "/api/graph/ask"):
                 body = self._body()
                 if body is None:
                     return self._send_json({"error": "body is not JSON"}, HTTPStatus.BAD_REQUEST)

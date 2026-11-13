@@ -23,7 +23,7 @@ export default function Explain({ summary, mode = 'graph', gap, compact = false 
         body: JSON.stringify({ summary: summary(), mode, gap }) })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`)
-      if (ctl.current === c) setSt({ busy: false, text: j.text, error: null, basis: j.basis })
+      if (ctl.current === c) setSt({ busy: false, text: j.text, error: null, basis: j.basis, model: j.model })
     } catch (e) {
       if (ctl.current === c) setSt({ busy: false, text: null, error: timedOut ? 'no answer within 170 s' : e.message })
     } finally { clearTimeout(timer) }
@@ -33,7 +33,7 @@ export default function Explain({ summary, mode = 'graph', gap, compact = false 
     <Button size="sm" variant="primary" disabled={st.busy} onClick={run}>{st.busy ? 'Explaining…' : mode === 'bridge' ? 'Bridge' : 'Explain this graph'}</Button>
     {st.error && <div style={{ marginTop: 6, fontSize: 12, color: C.red }}>{st.error}</div>}
     {st.text && <div style={{ marginTop: 8, padding: '8px 10px', border: `1px solid ${alpha(C.accent, '30')}`, borderRadius: 8, background: alpha(C.accent, '08'), fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre-wrap', color: C.body }}>
-      {st.text}<div style={{ marginTop: 6, fontFamily: MONO, fontSize: 10, color: C.dim }}>Nemotron on Hopper · names and summaries only{st.basis ? ` · ${st.basis}` : ''}</div>
+      {st.text}<div style={{ marginTop: 6, fontFamily: MONO, fontSize: 10, color: C.dim }}>{st.model || 'model'} on Hopper · names and summaries only{st.basis ? ` · ${st.basis}` : ''}</div>
     </div>}
   </div>
 }

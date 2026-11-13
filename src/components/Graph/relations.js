@@ -58,6 +58,7 @@ const T = {
   'describes|describes': ['Describes', 'Described by', 'describes'],
   'about|mentions': ['Mentioned in', 'Mentions', 'is mentioned in'],
   'about|about': ['Mentioned in', 'About', 'is mentioned in'],
+  'section|section': ['Has section', 'Section of', 'has section'],
   'about|tracked in Docket': ['Tracked in Docket', 'Tracks', 'is tracked in'],
   'about|mentioned in': ['Mentioned in', 'Mentions', 'is mentioned in'],
   'alerts|is alerting': ['Is alerting', 'Alerting on', 'is alerting on'],
