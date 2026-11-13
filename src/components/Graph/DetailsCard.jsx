@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { C, MONO, alpha } from '../../ui/theme'
 import { Button } from '../../ui/primitives'
 import { EASE } from '../../ui/motion'
-import { KIND, agoText, ageDays as recAge, isDated } from './analysis'
+import { KIND, agoText, ageDays as recAge, isDated, flows } from './analysis'
 import { relation } from './relations'
 import { link } from '../../router'
 
@@ -176,6 +176,7 @@ export default function DetailsCard({ node, model, raw, rawById, byId, select, t
       )}
 
       {node.kind === 'concept' && <ConceptContext name={node.label} search={search} />}
+      <Flows node={node} model={model} byId={byId} select={select} onHoverNode={onHoverNode} />
 
       {sections.map(s => {
         const open = isOpen(s.id)
@@ -203,6 +204,35 @@ export default function DetailsCard({ node, model, raw, rawById, byId, select, t
         )
       })}
       {!sections.length && <div style={{ fontSize: 12, color: C.muted, marginTop: 10 }}>No links to this node in the data loaded.</div>}
+    </div>
+  )
+}
+
+// Flows: where links lead from this node and what leads to it, a few hops deep (analysis.flows)
+function Flows({ node, model, byId, select, onHoverNode }) {
+  const chains = useMemo(() => (model ? [['down', flows(model.nodes, model.edges, node.id, 'down')], ['up', flows(model.nodes, model.edges, node.id, 'up')]] : []), [model, node.id])
+  if (!chains.some(([, c]) => c.length)) return null
+  return (
+    <div style={{ marginTop: 10, borderTop: `1px solid ${C.line}`, paddingTop: 6 }}>
+      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 1, textTransform: 'uppercase', color: C.muted, marginBottom: 4 }}
+        title="Chains of links a few hops deep, following link direction. Each starts at a different neighbor and steps to the most connected node next.">Flows</div>
+      {chains.map(([dir, list]) => list.map((chain, i) => {
+        const ids = dir === 'up' ? chain.slice().reverse() : chain
+        return (
+          <div key={dir + i} style={{ fontSize: 11.5, lineHeight: 1.6, color: C.text, wordBreak: 'break-word' }}>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: C.dim, marginRight: 6 }}>{dir === 'up' ? 'into' : 'from'}</span>
+            {ids.map((id, j) => {
+              const o = byId.get(id)
+              const here = id === node.id
+              return <span key={id}>
+                {j > 0 && <span style={{ color: C.dim }}> → </span>}
+                <a onClick={here ? undefined : () => select(id)} onMouseEnter={() => onHoverNode?.(id)} onMouseLeave={() => onHoverNode?.(null)}
+                  style={{ cursor: here ? 'default' : 'pointer', color: here ? C.bright : C.accent, fontWeight: here ? 600 : 400 }}>{o?.label ?? id}</a>
+              </span>
+            })}
+          </div>
+        )
+      }))}
     </div>
   )
 }

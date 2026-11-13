@@ -213,6 +213,16 @@ def graph_explain(body):
     return graph.explain(body)
 
 
+def graph_names(body):
+    from . import graph
+    return graph.cluster_names(body)
+
+
+def graph_ask(body):
+    from . import graph
+    return graph.ask(body)
+
+
 # ── Health: reachability for every service card ──────────────────────────────
 # The catalog is src/services.js (ESM, shared with the front end). Python can't import
 # it, so read the literal: every card has name: '...' and href: '...'.
@@ -298,6 +308,8 @@ GET = {
 POST = {
     "/api/media-sweep/toggle": media_sweep_toggle,
     "/api/graph/explain": graph_explain,
+    "/api/graph/names": graph_names,
+    "/api/graph/ask": graph_ask,
 }
 # Prefix -> (base url fn, timeout seconds, methods). Bodies and status codes relayed as is.
 PASSTHROUGH = {

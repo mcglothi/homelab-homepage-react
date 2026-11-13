@@ -27,6 +27,7 @@ import logging
 import os
 import re
 import threading
+import time
 from urllib.parse import quote, urlencode, urlsplit
 
 from . import fleet, routes, search
@@ -490,6 +491,58 @@ def _notes(ids, nodes):
     return out, edges
 
 
+SECTION_MAX = 12
+
+
+def _slug(text):
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60] or "section"
+
+
+def note_sections(content):
+    """[(heading, body)] for each '## ' heading of a markdown note (fenced code is not a heading)."""
+    out, cur, fenced = [], None, False
+    for line in (content or "").splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        m = None if fenced else re.match(r"##\s+(.+?)\s*#*\s*$", line)
+        if m:
+            cur = [m.group(1).strip(), []]
+            out.append(cur)
+        elif cur:
+            cur[1].append(line)
+    return [(h, "\n".join(b)) for h, b in out][:SECTION_MAX]
+
+
+def _sections(file, joins, nodes):
+    """An expanded note's '## ' sections as nodes (after GitNexus's markdown processor: a node per heading).
+    A fleet thing the note names links to the section that names it first, so the note's shape shows;
+    one no section names keeps its link to the note. Returns (section nodes, edges, joins left on the note)."""
+    got = _aikb("/note", path=file)
+    secs = note_sections((got or {}).get("content"))
+    if len(secs) < 2:   # one heading or none: a section node would only repeat the note
+        return {}, [], joins
+    nid = "n:" + file
+    out, edges, seen = {}, [], set()
+    for heading, _ in secs:
+        sid = "%s#%s" % (nid, _slug(heading))
+        if sid in seen:
+            continue
+        seen.add(sid)
+        out[sid] = {"id": sid, "kind": "section", "label": heading[:80], "sub": file, "result": False,
+                    "attrs": [["Note", file], ["Open", "/aikb/note?path=%s#%s" % (quote(file, safe=""), _slug(heading))], ["Source", "AIKB"]]}
+        edges.append({"a": nid, "b": sid, "kind": "section", "label": "section", "via": "AIKB", "prov": _provenance("section", None, "AIKB")})
+    left = []
+    for e in joins:
+        label = (nodes.get(e["a"]) or {}).get("label", "").lower()
+        hit = next(("%s#%s" % (nid, _slug(h)) for h, body in secs
+                    if label and re.search(r"(?<![\w.-])%s(?![\w-])" % re.escape(label), (h + "\n" + body).lower())), None)
+        if hit and e["b"] == nid:
+            edges.append(dict(e, b=hit, detail="section: %s" % out[hit]["label"]))
+        else:
+            left.append(e)
+    return out, edges, left
+
+
 def _joins(files, nodes, F):
     """The fleet nodes each note names (host, app, card, proxy and DNS names by label; IPs by the host that has
     them), as mention edges, plus each note's title. (None, {}) when AIKB is down."""
@@ -814,6 +867,8 @@ def _changes_graph(q, nodes, edges):
 
 
 def build(q, expand=None, live=False, lens=None, videos=False):
+    if expand and expand.startswith("n:") and "#" in expand:
+        expand = expand.split("#", 1)[0]   # a note section: expanding it opens its note (sections, and what each names)
     F = fleet.get()
     if lens == "concepts":
         return _concept_graph(q, expand, F, videos)
@@ -904,6 +959,11 @@ def build(q, expand=None, live=False, lens=None, videos=False):
                 truncated = True
                 continue
             out.setdefault(e["a"], dict(nodes[e["a"]], result=False))
+        if expand and expand.startswith("n:") and expand in found:
+            sec_nodes, sec_edges, joins = _sections(expand[2:], joins, nodes)
+            for sid, n in sec_nodes.items():
+                out.setdefault(sid, n)
+            out_edges += sec_edges
         out_edges += [e for e in joins if e["a"] in out]
         seeds += [i for i in found if i not in seeds]
         notes, note_edges = _notes([s for s in seeds if s in keep], nodes)
@@ -989,18 +1049,145 @@ def explain(body):
         prompt = EXPLAIN_PROMPT.format(summary=_explain_text(body["summary"]))
         counts = body["summary"].get("counts") or {}
         basis = "%s relationships, %s flags" % (counts.get("relationships", 0), counts.get("flags", 0))
-    model = routes.cfg("LLM_MODEL", "nemotron-3.5-lightning")
-    payload = {"model": model, "messages": [{"role": "system", "content": EXPLAIN_SYSTEM}, {"role": "user", "content": "/no_think\n" + prompt}],
-               "max_tokens": 700, "chat_template_kwargs": {"enable_thinking": False}}
     try:
-        response = request(routes.cfg("LLM_URL", "http://hopper:8012/v1/chat/completions"), method="POST", body=payload, timeout=150)
-        data = response.json
-        if response.status >= 400:
-            err = data.get("error") if isinstance(data, dict) else None
-            raise RuntimeError((err.get("message") if isinstance(err, dict) else err) or "model request failed (HTTP %s)" % response.status)
-        answer = (((((data or {}).get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or "").strip()
+        answer, model = _chat(EXPLAIN_SYSTEM, prompt, 700)
     except Exception as exc:  # noqa: BLE001 - surfaced in the Explain panel
         return 502, {"error": str(exc) or type(exc).__name__}
     if not answer:
         return 504, {"error": "the model returned nothing (timeout or error)"}
     return 200, {"text": answer, "model": model, "backend": "hopper", "basis": basis}
+
+
+# ── The Hopper model: whichever one is loaded right now ───────────────────────
+# Models on Hopper change as new ones come out. Ask the server what it is serving (GET /v1/models) and use that;
+# LLM_MODEL is only the fallback when the list can't be read.
+_model_cache = {"at": 0.0, "id": None}
+MODEL_TTL = 120
+
+
+def _llm_url():
+    return routes.cfg("LLM_URL", "http://hopper:8012/v1/chat/completions")
+
+
+def current_model():
+    now = time.monotonic()
+    if _model_cache["id"] and now - _model_cache["at"] < MODEL_TTL:
+        return _model_cache["id"]
+    model = None
+    try:
+        url = re.sub(r"/chat/completions/?$", "/models", _llm_url())
+        data = request(url, timeout=5).json or {}
+        ids = [m.get("id") for m in data.get("data") or [] if isinstance(m, dict) and m.get("id")]
+        model = ids[0] if ids else None
+    except Exception:  # noqa: BLE001 - fall back to the configured name
+        model = None
+    model = model or routes.cfg("LLM_MODEL", "nemotron-3.5-lightning")
+    _model_cache.update(at=now, id=model)
+    return model
+
+
+def _chat(system, prompt, max_tokens, timeout=150):
+    """(answer, model) from the loaded Hopper model; raises on HTTP errors."""
+    model = current_model()
+    payload = {"model": model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": "/no_think\n" + prompt}],
+               "max_tokens": max_tokens, "chat_template_kwargs": {"enable_thinking": False}}
+    response = request(_llm_url(), method="POST", body=payload, timeout=timeout)
+    data = response.json
+    if response.status >= 400:
+        err = data.get("error") if isinstance(data, dict) else None
+        _model_cache["at"] = 0.0   # the model may have been swapped: look again next time
+        raise RuntimeError((err.get("message") if isinstance(err, dict) else err) or "model request failed (HTTP %s)" % response.status)
+    answer = (((((data or {}).get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or "").strip()
+    return answer, model
+
+
+# ── Cluster names: a few words for each community, on request ─────────────────
+NAMES_SYSTEM = "You name groups of related items from a home-lab knowledge graph. Use only the names given. Never invent."
+NAMES_PROMPT = """Each numbered line is one group of related items (notes, hosts, apps, concepts).
+
+{groups}
+
+For every group, give a 2 to 4 word name for what its items have in common. Reply with one line per group,
+exactly "N: name", in the same order. No other text."""
+_names_cache = {}   # cluster key -> name; a key is a hash of the member names, so a renumbered cluster keeps its name
+NAMES_CACHE_MAX = 2000
+
+
+def _cluster_key(names):
+    return hashlib.sha1("\n".join(sorted(names)).encode()).hexdigest()[:16]
+
+
+def cluster_names(body):
+    """(status, {names: {key: name}, model}) for up to 16 clusters of member labels."""
+    clusters = body.get("clusters") if isinstance(body, dict) else None
+    if not isinstance(clusters, list) or not clusters:
+        return 400, {"error": "clusters are required"}
+    clean, index = [], {}
+    for i, c in enumerate(clusters[:16]):
+        names = [str(n)[:60] for n in (c.get("names") if isinstance(c, dict) else None) or [] if str(n).strip()][:10]
+        if len(names) >= 2:
+            clean.append((_cluster_key(names), names))
+            index[i] = clean[-1][0]
+    out = {k: _names_cache[k] for k, _ in clean if k in _names_cache}
+    todo = [(k, names) for k, names in clean if k not in out]
+    model = None
+    if todo:
+        groups = "\n".join("%d: %s" % (i + 1, ", ".join(names)) for i, (_, names) in enumerate(todo))
+        try:
+            answer, model = _chat(NAMES_SYSTEM, NAMES_PROMPT.format(groups=groups), 60 + 16 * len(todo), timeout=60)
+        except Exception as exc:  # noqa: BLE001 - the graph keeps its plain labels
+            return 502, {"error": str(exc) or type(exc).__name__, "names": out}
+        for line in answer.splitlines():
+            m = re.match(r"\s*(\d+)\s*[:.)-]\s*(.+)", line)
+            if m and 1 <= int(m.group(1)) <= len(todo):
+                name = m.group(2).strip().strip('"*').strip()[:40]
+                if name:
+                    key = todo[int(m.group(1)) - 1][0]
+                    out[key] = name
+                    if len(_names_cache) >= NAMES_CACHE_MAX:
+                        _names_cache.clear()
+                    _names_cache[key] = name
+    return 200, {"names": out, "by_index": {i: out[k] for i, k in index.items() if k in out}, "model": model or current_model()}
+
+
+# ── Ask the graph: a question answered from the graph on screen, with the nodes it relies on ──
+ASK_SYSTEM = ("You answer questions about a home-lab knowledge graph using only the nodes and links given. "
+              "Never invent names. If the graph does not hold the answer, say so plainly.")
+ASK_PROMPT = """Nodes (id | kind | name):
+{nodes}
+
+Links (id --relation--> id):
+{edges}
+
+Question: {question}
+
+Answer in at most 120 words. Then, on the last line, list the ids of the nodes your answer relies on, exactly as
+"NODES: id1, id2, ..." (at most 12 ids, only ids from the list above)."""
+
+
+def ask(body):
+    """(status, {text, ids, model}) for a question about the nodes and links the browser is showing."""
+    if not isinstance(body, dict):
+        return 400, {"error": "body is required"}
+    question = str(body.get("question") or "").strip()[:500]
+    nodes = body.get("nodes") if isinstance(body.get("nodes"), list) else []
+    edges = body.get("edges") if isinstance(body.get("edges"), list) else []
+    if not question or not nodes:
+        return 400, {"error": "question and nodes are required"}
+    nodes = [n for n in nodes if isinstance(n, dict) and n.get("id")][:300]
+    known = {str(n["id"]) for n in nodes}
+    node_lines = "\n".join("%s | %s | %s" % (n["id"], str(n.get("kind") or "")[:20], str(n.get("label") or "")[:60]) for n in nodes)
+    edge_lines = "\n".join("%s --%s--> %s" % (e[0], str(e[2] if len(e) > 2 else "links")[:24], e[1])
+                            for e in edges[:600] if isinstance(e, list) and len(e) >= 2 and str(e[0]) in known and str(e[1]) in known)
+    try:
+        answer, model = _chat(ASK_SYSTEM, ASK_PROMPT.format(nodes=node_lines, edges=edge_lines or "(none)", question=question), 500)
+    except Exception as exc:  # noqa: BLE001 - surfaced in the Ask panel
+        return 502, {"error": str(exc) or type(exc).__name__}
+    if not answer:
+        return 504, {"error": "the model returned nothing (timeout or error)"}
+    ids, text = [], answer
+    m = re.search(r"^\s*NODES:\s*(.*)$", answer, re.M | re.I)
+    if m:
+        text = (answer[:m.start()] + answer[m.end():]).strip()
+        ids = [i for i in (x.strip().strip("`'\"") for x in m.group(1).split(",")) if i in known][:12]
+    return 200, {"text": text, "ids": ids, "model": model, "backend": "hopper"}

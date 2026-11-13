@@ -6,6 +6,7 @@ import { KIND, FACETS, facetOf, initialOrder, weightOf, capGroups, localSubset, 
 import { createEngine } from './engine'
 import { useGraphTheme } from './theme'
 import Explain from './Explain'
+import Ask from './Ask'
 import CompareTray from './Compare'
 import { PANELS, Rail, Flyout, HelpOverlay, useUi, useGraphKeys, layoutPanels, RAIL_GAP } from './Panels'
 import { useHoverIntent } from '../../ui/useHoverIntent'
@@ -676,8 +677,8 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
   </>
   // Clusters: each community gathers in its own labeled area (colored by community, Topics halos on). 2D only.
   const layoutSeg = <Seg value={S.layout} onChange={v => set(v === 'clusters' ? { layout: v, color: 'comm', topics: true } : { layout: v })}
-    title="Free: one shared layout. Clusters: each community in its own labeled area (2D)"
-    opts={[['free', 'Layout: free'], ['clusters', 'Clusters', 'Each community gathers in its own area, biggest in the middle']]} />
+    title="Free: one shared layout. Clusters: each community in its own labeled area. Tree / Rings: strict levels by depth (2D)"
+    opts={[['free', 'Layout: free'], ['clusters', 'Clusters', 'Each community gathers in its own area, biggest in the middle'], ['tree', 'Tree', 'Parents in rows above their children'], ['rings', 'Rings', 'Top-level notes in the middle, each level a ring further out']]} />
   const quick = (
     <>
       {layoutSeg}
@@ -853,6 +854,7 @@ export default function GraphView({ q, full, setFull, pickIds, onSearch }) {
           <span style={{ color: flags.inferred ? theme.flag.inferred : C.dim }}>● {flags.inferred} inferred</span> · <span style={{ color: model.gap.size ? C.amber : C.dim }}>{model.gap.size} gap node{model.gap.size === 1 ? '' : 's'}</span>
         </div>
         <Explain summary={summary} />
+        <Ask model={model} onHighlight={ids => setShared({ ids })} />
         <Insights model={model} select={select} color={S.color} theme={theme} onSearch={searchSuggested} search={rootEntry.q} changes={raw?.changes} />
       </>
     ),

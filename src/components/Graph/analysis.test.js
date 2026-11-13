@@ -196,3 +196,70 @@ test('clusters: renumbered communities keep their old spots when expanded', () =
   assert.deepEqual([next.get(1).x, next.get(1).y], [first.get(0).x, first.get(0).y])
   assert.deepEqual([next.get(0).x, next.get(0).y], [first.get(1).x, first.get(1).y])
 })
+
+// ── communities (multi-level Louvain + connectivity split) ─────────────────────────────
+import { communities, splitDisconnected } from './analysis.js'
+
+const adjOf = (n, pairs) => { const a = Array.from({ length: n }, () => []); pairs.forEach(([x, y]) => { a[x].push(y); a[y].push(x) }); return a }
+const q = (n, pairs, comm) => modularity(Array.from({ length: n }, (_, i) => ({ id: i, comm: comm[i] })), pairs.map(([a, b]) => ({ a, b })))
+// the single local-moving pass this replaced, kept here to show the gain
+function onePass(n, adj, m) {
+  const k = adj.map(a => a.length), comm = Array.from({ length: n }, (_, i) => i), tot = k.slice()
+  let moved = true, it = 0
+  while (moved && it++ < 30) {
+    moved = false
+    for (let i = 0; i < n; i++) {
+      const ci = comm[i], w = {}
+      adj[i].forEach(j => { w[comm[j]] = (w[comm[j]] || 0) + 1 })
+      tot[ci] -= k[i]
+      let best = ci, bg = (w[ci] || 0) - (tot[ci] * k[i]) / (2 * m)
+      for (const c of Object.keys(w)) { const g = w[c] - (tot[c] * k[i]) / (2 * m); if (g > bg + 1e-9) { bg = g; best = +c } }
+      tot[best] += k[i]; if (best !== ci) { comm[i] = best; moved = true }
+    }
+  }
+  return comm
+}
+
+test('a ring of cliques comes out one community per clique', () => {
+  const pairs = []
+  for (let c = 0; c < 6; c++) {
+    const b = c * 4
+    for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) pairs.push([b + i, b + j])
+    pairs.push([b + 3, ((c + 1) % 6) * 4])
+  }
+  const comm = communities(24, adjOf(24, pairs))
+  assert.equal(new Set(comm).size, 6)
+  for (let c = 0; c < 6; c++) assert.equal(new Set(comm.slice(c * 4, c * 4 + 4)).size, 1)
+})
+
+test('planted groups: multi-level finds them and beats one local-moving pass on modularity', () => {
+  let seed = 7
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648)
+  const n = 120, group = i => Math.floor(i / 15), pairs = []
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (rnd() < (group(i) === group(j) ? 0.35 : 0.012)) pairs.push([i, j])
+  const adj = adjOf(n, pairs)
+  const multi = communities(n, adj), single = onePass(n, adj, pairs.length)
+  assert.ok(q(n, pairs, multi) > q(n, pairs, single) + 0.01, `multi ${q(n, pairs, multi)} vs single ${q(n, pairs, single)}`)
+  // nearly every planted group lands in a single community
+  let pure = 0
+  for (let g = 0; g < 8; g++) if (new Set(multi.slice(g * 15, g * 15 + 15)).size === 1) pure++
+  assert.ok(pure >= 7, `only ${pure}/8 planted groups recovered whole`)
+})
+
+test('a community whose members are not connected inside it is split', () => {
+  // 0-1 connected, 2 alone, all labelled community 0
+  assert.deepEqual(splitDisconnected([0, 0, 0], adjOf(3, [[0, 1]])), [0, 0, 1])
+  // disconnected graph: two triangles never share a community
+  const comm = communities(6, adjOf(6, [[0, 1], [1, 2], [0, 2], [3, 4], [4, 5], [3, 5]]))
+  assert.notEqual(comm[0], comm[3])
+})
+
+test('flows follow link direction, prefer important next steps, and skip single hops', async () => {
+  const { flows } = await import('./analysis.js')
+  const nodes = ['s', 'a', 'b', 'c', 'd', 'x'].map((id, i) => ({ id, val: { s: 1, a: 5, b: 3, c: 9, d: 1, x: 7 }[id] }))
+  const edges = [['s', 'a'], ['s', 'b'], ['a', 'c'], ['a', 'd'], ['c', 's'], ['s', 'x']].map(([a, b]) => ({ a, b }))
+  // x is the biggest neighbor but leads nowhere: one hop, dropped. a -> c (bigger than d) -> s is a cycle, stops.
+  assert.deepEqual(flows(nodes, edges, 's', 'down'), [['s', 'a', 'c']])
+  assert.deepEqual(flows(nodes, edges, 'c', 'up'), [['c', 'a', 's']])
+  assert.deepEqual(flows(nodes, edges, 'd', 'down'), [])
+})

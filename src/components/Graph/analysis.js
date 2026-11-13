@@ -5,7 +5,7 @@
 // Kinds of node, in the order the Groups list shows them. Colors come from the theme (theme.js).
 export const KIND = {
   host: 'Hosts / VMs', pool: 'ZFS pools', dataset: 'Datasets', app: 'Apps', service: 'Dashboard cards',
-  proxy: 'Proxy names (NPM)', dns: 'DNS names', network: 'Addresses', target: 'Monitoring targets', alert: 'Alerts', cert: 'Certificates', incident: 'Incidents', pending: 'Pending (AIKB)', viewer: 'Viewers', device: 'Devices', title: 'Titles', video: 'Videos (watch)', channel: 'Channels', note: 'AIKB notes', query: 'The search', concept: 'Concepts',
+  proxy: 'Proxy names (NPM)', dns: 'DNS names', network: 'Addresses', target: 'Monitoring targets', alert: 'Alerts', cert: 'Certificates', incident: 'Incidents', pending: 'Pending (AIKB)', viewer: 'Viewers', device: 'Devices', title: 'Titles', video: 'Videos (watch)', channel: 'Channels', note: 'AIKB notes', section: 'Note sections', query: 'The search', concept: 'Concepts',
 }
 
 // ── Intent ───────────────────────────────────────────────────────────────────
@@ -213,34 +213,74 @@ function betweenness(n, adj) {
   return Array.from(C, c => c / mx)
 }
 
-// One pass of local moving (Louvain phase 1): good enough to find the clusters.
-function communities(n, adj, m) {
-  const k = adj.map(a => a.length)
-  const comm = Array.from({ length: n }, (_, i) => i)
-  const tot = k.slice()
-  let moved = true
-  let it = 0
-  while (moved && it++ < 30) {
-    moved = false
+// Communities: multi-level Louvain (move nodes to the neighbor community that raises modularity most, fold each
+// community into one node, repeat on the folded graph) with Leiden's guarantee added at the end: a community whose
+// members are not connected inside it is split into its connected parts. One local-moving pass alone (what this was
+// before) stops at many small, sometimes disconnected groups.
+function localMoving(n, nb, k, m2, comm) {
+  // nb[i]: Map neighbor -> edge weight (self-loops carry a folded community's inner weight)
+  const tot = new Float64Array(n)
+  for (let i = 0; i < n; i++) tot[comm[i]] += k[i]
+  let moved = false, pass = 0, changed = true
+  while (changed && pass++ < 40) {
+    changed = false
     for (let i = 0; i < n; i++) {
       const ci = comm[i]
-      const w = {}
-      adj[i].forEach(j => { w[comm[j]] = (w[comm[j]] || 0) + 1 })
+      const w = new Map()
+      for (const [j, wt] of nb[i]) if (j !== i) w.set(comm[j], (w.get(comm[j]) || 0) + wt)
       tot[ci] -= k[i]
-      let best = ci
-      let bg = (w[ci] || 0) - (tot[ci] * k[i]) / (2 * m)
-      for (const c of Object.keys(w)) {
-        const g = w[c] - (tot[c] * k[i]) / (2 * m)
-        if (g > bg + 1e-9) { bg = g; best = +c }
+      let best = ci, bg = (w.get(ci) || 0) - (tot[ci] * k[i]) / m2
+      for (const [c, wc] of w) {
+        const g = wc - (tot[c] * k[i]) / m2
+        if (g > bg + 1e-9) { bg = g; best = c }
       }
       tot[best] += k[i]
-      if (best !== ci) { comm[i] = best; moved = true }
+      if (best !== ci) { comm[i] = best; changed = true; moved = true }
     }
   }
+  return moved
+}
+
+// Leiden's refinement guarantee: every community is connected. Splits each one into its connected parts.
+export function splitDisconnected(comm, adj) {
+  const out = new Array(comm.length).fill(-1)
+  let next = 0
+  for (let s = 0; s < comm.length; s++) {
+    if (out[s] >= 0) continue
+    out[s] = next
+    const q = [s]
+    for (let h = 0; h < q.length; h++) for (const j of adj[q[h]]) if (out[j] < 0 && comm[j] === comm[s]) { out[j] = next; q.push(j) }
+    next++
+  }
+  return out
+}
+
+export function communities(n, adj) {
+  // level 0: the graph itself, unweighted
+  let nb = adj.map(a => { const w = new Map(); a.forEach(j => w.set(j, (w.get(j) || 0) + 1)); return w })
+  let member = Array.from({ length: n }, (_, i) => i)   // original node -> node of the current level
+  const m2 = adj.reduce((s, a) => s + a.length, 0) || 1  // 2m
+  for (let level = 0; level < 12; level++) {
+    const size = nb.length
+    const k = nb.map(w => { let s = 0; for (const wt of w.values()) s += wt; return s })
+    const comm = Array.from({ length: size }, (_, i) => i)
+    if (!localMoving(size, nb, k, m2, comm)) break
+    const ids = new Map()
+    comm.forEach(c => { if (!ids.has(c)) ids.set(c, ids.size) })
+    const folded = Array.from({ length: ids.size }, () => new Map())
+    for (let i = 0; i < size; i++) for (const [j, wt] of nb[i]) {
+      const a = ids.get(comm[i]), b = ids.get(comm[j])
+      folded[a].set(b, (folded[a].get(b) || 0) + wt)
+    }
+    member = member.map(v => ids.get(comm[v]))
+    nb = folded
+    if (ids.size === size) break
+  }
+  const comm = splitDisconnected(member, adj)
   const size = {}
   comm.forEach(c => { size[c] = (size[c] || 0) + 1 })
   const map = {}
-  Object.keys(size).sort((a, b) => size[b] - size[a]).forEach((c, i) => { map[c] = i })
+  Object.keys(size).sort((a, b) => size[b] - size[a] || a - b).forEach((c, i) => { map[c] = i })
   return comm.map(c => map[c])
 }
 
@@ -291,7 +331,7 @@ export function metrics(nodes, edges, size) {
     if (a !== undefined && b !== undefined && a !== b) { adj[a].push(b); adj[b].push(a) }
   })
   const bc = betweenness(nodes.length, adj)
-  const cm = communities(nodes.length, adj, edges.length || 1)
+  const cm = communities(nodes.length, adj)
   const scale = Math.max(0.42, Math.min(1, 1.5 - Math.log10(Math.max(nodes.length, 10)) * 0.5))
   const dp = depths(nodes, edges)
   const mean = dp.reduce((a, b) => a + b, 0) / (dp.length || 1)
@@ -401,6 +441,55 @@ export function clusterAnchors(groups, prev = new Map(), spacing = 300, min = 3)
     const s = slot(i)
     taken.add(key(s))
     out.set(g.comm, { ...s, members: new Set(g.members) })
+  }
+  return out
+}
+
+// Tree and Rings layouts: pull each node toward its level by depth (relative to the shallowest node).
+// tree: level L sits on the row y = L*gap*1.3, with only a light sideways pull so rows can spread.
+// rings: level L sits on the circle r = (L+0.6)*gap*1.4; level 0 gets a small ring, not one crowded point.
+// k is the ordinary centering strength (for nodes without a depth), kl the level strength; both already scaled by alpha.
+export function levelPull(ns, lay, gap, k, kl) {
+  let lo = Infinity
+  for (const n of ns) if (n.depth !== undefined && n.depth < lo) lo = n.depth
+  for (const n of ns) {
+    const lvl = n.depth === undefined ? null : n.depth - lo
+    if (lay === 'tree') {
+      n.vx -= (n.x || 0) * k * 0.25
+      if (lvl === null) n.vy -= (n.y || 0) * k; else n.vy += (lvl * gap * 1.3 - (n.y || 0)) * kl
+    } else {
+      const x = n.x || 0, y = n.y || 0, r = Math.hypot(x, y) || 1
+      const want = lvl === null ? r : (lvl + 0.6) * gap * 1.4
+      const d = (want - r) * kl
+      n.vx += (x / r) * d; n.vy += (y / r) * d
+    }
+  }
+}
+
+// Flows through a node (after GitNexus's execution flows): chains that follow link direction away from it
+// ('down', a -> b) or toward it ('up'), up to `depth` hops. Each chain starts at a different neighbor and steps to
+// the most important unvisited node next, so a few chains show where things lead without listing every path.
+// Only chains of 2+ hops are kept: a single hop is already in the relation lists.
+export function flows(nodes, edges, id, dir = 'down', depth = 4, max = 4) {
+  const val = new Map(nodes.map(n => [n.id, n.val || 0]))
+  const next = new Map()
+  for (const e of edges) {
+    const [from, to] = dir === 'down' ? [e.a, e.b] : [e.b, e.a]
+    if (from === to || !val.has(from) || !val.has(to)) continue
+    if (!next.has(from)) next.set(from, new Set())
+    next.get(from).add(to)
+  }
+  const byVal = ids => [...ids].sort((x, y) => val.get(y) - val.get(x) || String(x).localeCompare(String(y)))
+  const out = []
+  for (const first of byVal(next.get(id) || [])) {
+    const chain = [id, first], seen = new Set(chain)
+    while (chain.length <= depth) {
+      const step = byVal(next.get(chain[chain.length - 1]) || []).find(x => !seen.has(x))
+      if (step === undefined) break
+      chain.push(step); seen.add(step)
+    }
+    if (chain.length >= 3) out.push(chain)
+    if (out.length === max) break
   }
   return out
 }
