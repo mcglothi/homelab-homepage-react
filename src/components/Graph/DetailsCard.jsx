@@ -210,7 +210,11 @@ export default function DetailsCard({ node, model, raw, rawById, byId, select, t
 
 // Flows: where links lead from this node and what leads to it, a few hops deep (analysis.flows)
 function Flows({ node, model, byId, select, onHoverNode }) {
-  const chains = useMemo(() => (model ? [['down', flows(model.nodes, model.edges, node.id, 'down')], ['up', flows(model.nodes, model.edges, node.id, 'up')]] : []), [model, node.id])
+  const chains = useMemo(() => {
+    if (!model) return []
+    const real = model.nodes.filter(n => !n.more || n.id === node.id)   // a fold bubble ("+6 more") is not a step
+    return [['down', flows(real, model.edges, node.id, 'down')], ['up', flows(real, model.edges, node.id, 'up')]]
+  }, [model, node.id])
   if (!chains.some(([, c]) => c.length)) return null
   return (
     <div style={{ marginTop: 10, borderTop: `1px solid ${C.line}`, paddingTop: 6 }}>
