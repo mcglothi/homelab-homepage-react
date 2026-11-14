@@ -40,6 +40,7 @@ const OPENSOAK_URL    = process.env.OPENSOAK_URL      || 'https://opensoak.home.
 const WATCH_URL       = process.env.WATCH_URL        || 'http://10.10.10.50:8790'
 const AIKB_HEALTH_URL = process.env.AIKB_HEALTH_URL  || 'http://10.10.10.50:8791'
 const USAGE_URL       = process.env.USAGE_URL        || ''
+const GROWTH_URL      = process.env.GROWTH_URL       || 'http://10.10.10.50:3055'
 // Weather for the top bar and sidebar tile (Open-Meteo, no key)
 const WEATHER_LAT     = process.env.WEATHER_LAT      || '43.93'
 const WEATHER_LON     = process.env.WEATHER_LON      || '-69.97'
@@ -368,18 +369,22 @@ const getWeather = cached(10 * 60_000, async () => {
 app.get('/api/weather', apiRoute(() => getWeather()))
 
 // ── Docket tabs: Turing feeds, passed straight through ───────────────────────
-// /api/watch/* → watch (:8790), /api/aikb/* → aikb_health (:8791). Bodies and status
-// codes are relayed as-is so the views can show upstream errors.
+// /api/watch/* → watch (:8790), /api/aikb/* → aikb_health (:8791),
+// /api/growth/* → growth-replies (:3055). Bodies and status codes are relayed as-is
+// so the views can show upstream errors. Request bodies are not logged (Approve may send a PIN).
 function passthrough(base, timeoutMs) {
   return (req, res) => {
-    const upstream = http.request(new URL(req.originalUrl, base), { method: req.method, headers: { accept: 'application/json' } }, up => {
+    const headers = { accept: 'application/json' }
+    if (req.headers['content-type']) headers['content-type'] = req.headers['content-type']
+    if (req.headers['content-length']) headers['content-length'] = req.headers['content-length']
+    const upstream = http.request(new URL(req.originalUrl, base), { method: req.method, headers }, up => {
       res.status(up.statusCode)
       res.set('content-type', up.headers['content-type'] || 'application/json')
       up.pipe(res)
     })
     upstream.on('error', e => { if (!res.headersSent) res.status(502).json({ error: e.message }) })
     upstream.setTimeout(timeoutMs, () => upstream.destroy(new Error('upstream timeout')))
-    upstream.end()
+    req.pipe(upstream)
   }
 }
 app.get('/api/watch/*', passthrough(WATCH_URL, 20000))
@@ -389,6 +394,9 @@ app.get('/api/usage/*', (req, res, next) => {
   if (!USAGE_URL) return res.status(503).json({ error: 'USAGE_URL not configured' })
   return passthrough(USAGE_URL, 30000)(req, res, next)
 })
+app.get('/api/growth/*', passthrough(GROWTH_URL, 20000))
+app.post('/api/growth/*', passthrough(GROWTH_URL, 20000))
+app.patch('/api/growth/*', passthrough(GROWTH_URL, 20000))
 
 // ── Static files (production) ─────────────────────────────────────────────────
 const distPath = path.join(__dirname, '../dist')
